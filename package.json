@@ -1,0 +1,45 @@
+{
+  "name": "photo-cc",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Mobile-first, offline PSD editor — open, edit and save layered Photoshop documents on a phone, with editable text layers.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/deepak9655/photo_cc.git"
+  },
+  "keywords": [
+    "psd",
+    "photoshop",
+    "editor",
+    "mobile",
+    "canvas",
+    "offline",
+    "pwa",
+    "layers"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "node tools/run-checks.mjs",
+    "typecheck": "tsc --noEmit",
+    "samples": "node tools/make-samples.mjs",
+    "icons": "node tools/make-icons.mjs"
+  },
+  "dependencies": {
+    "ag-psd": "31.0.3"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.0.11",
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.1.2",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.7"
+  }
+}

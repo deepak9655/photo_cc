@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: PSD round-trip + UI smoke tests
+        run: npm run check
+      - name: Production build
+        run: npx vite build
+      - name: Upload rendered previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-previews
+          path: tools/out/*.png
+          if-no-files-found: ignore

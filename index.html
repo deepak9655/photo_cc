@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>photo_cc — PSD editor for phones</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5" />
+    <meta name="description" content="Open, edit and save layered PSD files on a phone. Small, offline, no account, no AI." />
+    <meta name="theme-color" content="#12101a" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div id="app" class="app" data-sheet="none">
+      <!-- ── top bar ─────────────────────────────────────────────────── -->
+      <header class="topbar" id="topbar">
+        <button class="icon-btn" id="btn-open" title="Open a PSD file" aria-label="Open a PSD file">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7a2 2 0 0 1 2-2h3.6l1.7 2H18a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z"/><path d="M12 11v5m0 0 2.2-2.2M12 16l-2.2-2.2"/></svg>
+        </button>
+        <div class="title" id="doc-title">
+          <span class="doc-name" id="doc-name">No document</span>
+          <span class="doc-meta" id="doc-meta">Open a PSD to begin</span>
+        </div>
+        <button class="icon-btn" id="btn-undo" title="Undo" aria-label="Undo" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h9a6 6 0 0 1 0 12h-3"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-redo" title="Redo" aria-label="Redo" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9h-9a6 6 0 0 0 0 12h3"/></svg>
+        </button>
+        <button class="icon-btn accent" id="btn-save" title="Save as PSD" aria-label="Save as PSD" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h9l4 4v12H6z"/><path d="M9 4v6h6"/><path d="M9 20v-5h6v5"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-menu" title="Menu" aria-label="Menu">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </header>
+
+      <!-- ── canvas stage ────────────────────────────────────────────── -->
+      <main class="stage" id="stage">
+        <canvas id="view" class="view-canvas" aria-label="Document canvas"></canvas>
+
+        <div class="empty-state" id="empty-state">
+          <h1>photo_cc</h1>
+          <p>Edit layered <strong>PSD</strong> files on a phone — offline, no account, no AI.</p>
+          <div class="empty-actions">
+            <button class="btn primary" id="btn-open-2">Open a PSD file</button>
+            <button class="btn" id="btn-sample">Open sample file</button>
+            <button class="btn" id="btn-new">New document</button>
+          </div>
+          <p class="tiny">Text layers stay editable. Layer styles, masks and smart objects are kept exactly as they are.</p>
+        </div>
+
+        <div class="zoom-controls">
+          <button class="chip" id="btn-zoom-out" aria-label="Zoom out">−</button>
+          <button class="chip zoom-value" id="btn-fit" aria-label="Fit to screen">100%</button>
+          <button class="chip" id="btn-zoom-in" aria-label="Zoom in">+</button>
+        </div>
+
+        <div class="busy" id="busy" hidden><div class="spinner"></div><span id="busy-text">Working…</span></div>
+        <div class="toasts" id="toasts" aria-live="polite"></div>
+      </main>
+
+      <!-- ── tool rail ──────────────────────────────────────────────── -->
+      <nav class="toolbar" id="toolbar">
+        <button class="tool" data-tool="move" title="Move / select layer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18"/><path d="m12 3 3 3M12 3 9 6M12 21l3-3M12 21l-3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg>
+          <span>Move</span>
+        </button>
+        <button class="tool" data-tool="brush" title="Brush">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20c3 .5 5-1 6-3l8-8-3-3-8 8c-2 1-3 3-3 6Z"/><path d="m15 6 3 3"/></svg>
+          <span>Brush</span>
+        </button>
+        <button class="tool" data-tool="eraser" title="Eraser">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20h12"/><path d="m5 15 6-6 6 6-4 4H9z"/><path d="m11 9 4-4 4 4-4 4"/></svg>
+          <span>Eraser</span>
+        </button>
+        <button class="tool" data-tool="fill" title="Fill rectangle">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="14" rx="2"/><path d="M4 10h16"/></svg>
+          <span>Fill</span>
+        </button>
+        <button class="tool" data-tool="text" title="Text">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M12 6v13M9 19h6"/></svg>
+          <span>Text</span>
+        </button>
+        <div class="toolbar-spacer"></div>
+        <button class="color-btn" id="btn-color" title="Brush &amp; fill colour" aria-label="Colour">
+          <span class="swatch" id="color-swatch"></span>
+          <span>Colour</span>
+        </button>
+      </nav>
+
+      <!-- ── layer strip (always visible, thumb-reachable) ──────────── -->
+      <section class="layer-strip" id="layer-strip" aria-label="Layers">
+        <div class="strip-head">
+          <button class="chip" id="btn-layers-toggle" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true" class="chip-icon"><path d="m12 4 8 4-8 4-8-4 8-4Z"/><path d="m4 14 8 4 8-4"/></svg>
+            <span id="layers-title">Layers</span>
+          </button>
+          <div class="strip-actions">
+            <button class="chip" id="btn-add-text" title="New text layer">+ Text</button>
+            <button class="chip" id="btn-add-layer" title="New empty layer">+ Layer</button>
+            <button class="chip" id="btn-layer-menu" title="Layer options">…</button>
+          </div>
+        </div>
+        <div class="strip-body">
+          <div class="layers" id="layers"></div>
+          <div class="props" id="props"></div>
+        </div>
+      </section>
+    </div>
+
+    <input type="file" id="file-input" accept=".psd,.psb,image/vnd.adobe.photoshop" hidden />
+    <input type="file" id="image-input" accept="image/*" hidden />
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

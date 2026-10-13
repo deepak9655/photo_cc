@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+tools/.build/
+tools/out/
+
+# generated sample documents (npm run samples)
+samples/
+
+# editor / OS noise
+.DS_Store
+*.log
+.vscode/
+.idea/

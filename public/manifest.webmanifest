@@ -1,0 +1,35 @@
+{
+  "name": "photo_cc — PSD editor for phones",
+  "short_name": "photo_cc",
+  "description": "Open, edit and save layered Photoshop documents on a phone. Offline, no account, no AI. An independent open-source project, not affiliated with Adobe.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "fullscreen"],
+  "orientation": "any",
+  "background_color": "#12101a",
+  "theme_color": "#12101a",
+  "categories": ["graphics", "photo", "productivity"],
+  "file_handlers": [
+    {
+      "action": "./index.html",
+      "accept": {
+        "image/vnd.adobe.photoshop": [".psd", ".psb"]
+      },
+      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png" }],
+      "launch_type": "single-client"
+    }
+  ],
+  "share_target": {
+    "action": "./index.html",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": { "files": [{ "name": "file", "accept": ["image/vnd.adobe.photoshop", ".psd", ".psb"] }] }
+  },
+  "icons": [
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
