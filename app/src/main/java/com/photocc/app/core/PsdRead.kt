@@ -40,7 +40,30 @@ object PsdRead {
     private val smartObjectKeys = setOf("SoLd", "PlLd", "SoLE")
     private val vectorFillKeys = setOf("SoCo", "GdFl", "PtFl")
 
-    fun read(data: ByteArray, fileName: String = "untitled.psd"): PsdDocument {
+    /**
+     * Pixel budget for an imported document.
+     *
+     * Decoding a 60 MPix poster at full resolution costs 240 MB of ARGB pixels
+     * *per full-size layer*, which is an instant `OutOfMemoryError` on a phone.
+     * Above the budget the reader samples the document down instead (every other
+     * pixel, then every fourth …) and the app says so in the document info sheet.
+     * 24 MPix ≈ 96 MB for a single full-canvas layer — already generous.
+     */
+    const val DEFAULT_MAX_PIXELS = 24_000_000
+
+    /** Set by [read]: how much the document was sampled down (1 = full resolution). */
+    var lastImportStride: Int = 1
+        private set
+
+    /** Original document size before sampling, or null when nothing was sampled. */
+    var lastSourceSize: Pair<Int, Int>? = null
+        private set
+
+    fun read(
+        data: ByteArray,
+        fileName: String = "untitled.psd",
+        maxPixels: Int = DEFAULT_MAX_PIXELS,
+    ): PsdDocument {
         if (data.size < 26) throw PsdFormatException("File is too small to be a PSD")
         val cursor = Cursor(data)
         val signature = cursor.fourCc()
@@ -63,7 +86,27 @@ object PsdRead {
         }
         if (bitDepth != 8 && bitDepth != 16) throw PsdFormatException("Unsupported bit depth $bitDepth")
 
-        val doc = PsdDocument(width, height)
+        // Memory budget: above `maxPixels` the document is sampled down (2×, 4×, …).
+        var stride = 1
+        while (stride < 64 &&
+            (width.toLong() / stride) * (height.toLong() / stride) > maxPixels.toLong()
+        ) {
+            stride *= 2
+        }
+        while (stride > 1 && (width / stride < 1 || height / stride < 1)) stride /= 2
+        importStride = stride
+        val doc = PsdDocument(
+            (width + stride - 1) / stride,
+            (height + stride - 1) / stride,
+        )
+        doc.importStride = stride
+        doc.sourceWidth = width
+        doc.sourceHeight = height
+        if (stride > 1) {
+            doc.notes.add("Opened at 1/$stride resolution (${width}×$height original) to fit the phone's memory")
+        }
+        lastImportStride = stride
+        lastSourceSize = if (stride > 1) width to height else null
         doc.fileName = fileName
         doc.outlineName = outlineName(fileName)
         doc.sourceBytes = data.size.toLong()
@@ -331,8 +374,8 @@ object PsdRead {
 
         val layer = RasterLayer(name = record.name.ifBlank { "Layer" })
         applyCommon(layer, record)
-        layer.x = record.left
-        layer.y = record.top
+        layer.x = scaled(record.left)
+        layer.y = scaled(record.top)
         when {
             // Files often keep the rendered pixels of fill and adjustment layers
             // (that is how other apps show them), so use them when they are there.
@@ -344,9 +387,9 @@ object PsdRead {
                 // Nothing to draw, but keep the record (and its mask) so saving
                 // writes back exactly what the file had.
                 layer.unsupported = note
-                layer.preservedBounds = Rect(record.left, record.top, record.width, record.height)
+                layer.preservedBounds = scaledRect(record.left, record.top, record.width, record.height)
             }
-            else -> layer.preservedBounds = Rect(record.left, record.top, record.width, record.height)
+            else -> layer.preservedBounds = scaledRect(record.left, record.top, record.width, record.height)
         }
         return layer
     }
@@ -356,6 +399,17 @@ object PsdRead {
         record.channels.any { channel ->
             channel.length > 2L && (channel.id in 0..3 || channel.id == -1)
         }
+
+    /** Sampling stride of the document being read (1 = full resolution). */
+    private var importStride = 1
+
+    private fun scaled(value: Int): Int = if (importStride == 1) value else value / importStride
+
+    private fun scaledLength(value: Int): Int =
+        if (importStride == 1) value.coerceAtLeast(1) else ((value + importStride - 1) / importStride).coerceAtLeast(1)
+
+    private fun scaledRect(left: Int, top: Int, width: Int, height: Int): Rect =
+        Rect(scaled(left), scaled(top), scaledLength(width), scaledLength(height))
 
     private fun applyCommon(layer: Layer, record: LayerRecord) {
         layer.visible = record.visible
@@ -399,8 +453,8 @@ object PsdRead {
             val bottom = cursor.f32()
 
             layer.transform = transform
-            layer.x = if (left.isFinite()) left else transform[4].toFloat()
-            layer.y = if (top.isFinite()) top else transform[5].toFloat()
+            layer.x = (if (left.isFinite()) left else transform[4].toFloat()) / importStride
+            layer.y = (if (top.isFinite()) top else transform[5].toFloat()) / importStride
             layer.sourceBoxWidth = (right - left).takeIf { it.isFinite() && it > 0f }
 
             val dict = descriptor.dict
@@ -426,7 +480,7 @@ object PsdRead {
                 val parsed = EngineData.readText(engine)
                 if (parsed != null) {
                     if (parsed.text.isNotBlank() || rawText.isBlank()) layer.text.text = parsed.text
-                    parsed.fontSize?.let { if (it > 0f) layer.text.size = it }
+                    parsed.fontSize?.let { if (it > 0f) layer.text.size = it / importStride }
                     parsed.tracking?.let { layer.text.tracking = it }
                     layer.text.leading = if (parsed.autoLeading) null else parsed.leading
                     layer.text.fauxBold = parsed.fauxBold
@@ -443,7 +497,7 @@ object PsdRead {
             }
             if (layer.text.text.isBlank()) layer.text.text = record.name.ifBlank { "Text" }
             layer.text.fontFamily = FontMap.psdNameToDevice(layer.text.psdFontName).family
-            layer.sourceBounds = Rect(record.left, record.top, record.width.coerceAtLeast(1), record.height.coerceAtLeast(1))
+            layer.sourceBounds = scaledRect(record.left, record.top, record.width, record.height)
         } catch (_: Exception) {
             layer.unsupported = "Text layer whose type block could not be read — preserved as-is"
         }
@@ -511,17 +565,17 @@ object PsdRead {
 
             if (raster != null) {
                 if (record.hasContent && raster.unsupported == null) {
-                    val pixels = Pixels.empty(record.width, record.height)
+                    val pixels = Pixels.empty(scaledLength(record.width), scaledLength(record.height))
                     raster.pixels = pixels
-                    assemble(pixels, red, green, blue, alpha, grayscale)
+                    assemble(pixels, red, green, blue, alpha, grayscale, record.width, importStride)
                 }
                 val mask = record.mask
                 val maskWidth = mask?.width ?: 0
                 val maskHeight = mask?.height ?: 0
                 if (maskData != null && mask != null && maskData.size >= maskWidth * maskHeight && maskWidth > 0) {
                     raster.mask = MaskInfo(
-                        bounds = Rect(mask.left, mask.top, maskWidth, maskHeight),
-                        data = maskData,
+                        bounds = scaledRect(mask.left, mask.top, maskWidth, maskHeight),
+                        data = if (importStride == 1) maskData else subsampleBytes(maskData, maskWidth, maskHeight),
                         defaultColor = mask.defaultColor,
                         disabled = (mask.flags and 0x02) != 0,
                     )
@@ -587,6 +641,11 @@ object PsdRead {
         }
     }
 
+    /**
+     * Packs the decoded channel samples into ARGB pixels. When [stride] is > 1
+     * the source is sampled down (every stride-th pixel in both directions), which
+     * is how a document that does not fit in memory is still opened.
+     */
     private fun assemble(
         pixels: Pixels,
         red: ByteArray?,
@@ -594,16 +653,41 @@ object PsdRead {
         blue: ByteArray?,
         alpha: ByteArray?,
         grayscale: Boolean,
+        sourceWidth: Int = pixels.width,
+        stride: Int = 1,
     ) {
         val data = pixels.data
-        val count = pixels.width * pixels.height
-        for (i in 0 until count) {
-            val a = if (alpha != null) alpha[i].toInt() and 0xFF else 255
-            val r = if (red != null) red[i].toInt() and 0xFF else 0
-            val g = if (green != null) green[i].toInt() and 0xFF else if (grayscale) r else 0
-            val b = if (blue != null) blue[i].toInt() and 0xFF else if (grayscale) r else 0
-            data[i] = Argb.pack(a, r, g, if (grayscale) r else b)
+        val width = pixels.width
+        val height = pixels.height
+        var i = 0
+        for (y in 0 until height) {
+            val row = y * stride * sourceWidth
+            for (x in 0 until width) {
+                val index = row + x * stride
+                val a = if (alpha != null && index < alpha.size) alpha[index].toInt() and 0xFF else 255
+                val r = if (red != null && index < red.size) red[index].toInt() and 0xFF else 0
+                val g = if (green != null && index < green.size) green[index].toInt() and 0xFF else if (grayscale) r else 0
+                val b = if (blue != null && index < blue.size) blue[index].toInt() and 0xFF else if (grayscale) r else 0
+                data[i++] = Argb.pack(a, r, g, if (grayscale) r else b)
+            }
         }
+    }
+
+    /** Down-samples a mask channel with the same stride the colours used. */
+    private fun subsampleBytes(source: ByteArray, width: Int, height: Int): ByteArray {
+        val stride = importStride
+        val outWidth = ((width + stride - 1) / stride).coerceAtLeast(1)
+        val outHeight = ((height + stride - 1) / stride).coerceAtLeast(1)
+        val out = ByteArray(outWidth * outHeight)
+        var i = 0
+        for (y in 0 until outHeight) {
+            val row = y * stride * width
+            for (x in 0 until outWidth) {
+                val index = row + x * stride
+                out[i++] = if (index < source.size) source[index] else 0
+            }
+        }
+        return out
     }
 
     /* ------------------------------------------------------------------ flattened files */

@@ -26,6 +26,9 @@ object Argb {
 
     fun transparent(): Int = 0
 
+    /** Opaque white, used as the backdrop for formats that have no alpha (JPEG). */
+    const val OPAQUE_WHITE: Int = -0x1
+
     /** Straight-alpha source-over of `src` (with alpha scaled by `alphaScale` 0..255) onto `dst`. */
     fun over(dst: Int, src: Int, alphaScale: Int): Int {
         val sa = (((src ushr 24) and 0xFF) * alphaScale + 127) / 255
@@ -346,6 +349,17 @@ class PsdDocument(
     /** Colour mode / bit depth of the file we opened, so the UI can be honest. */
     var sourceColorMode: Int = 3
     var sourceBitDepth: Int = 8
+
+    /**
+     * How much the document was sampled down when it was opened (1 = untouched,
+     * 2 = every other pixel). Big files are opened at reduced resolution rather
+     * than failing to allocate; the info sheet and the save dialog say so.
+     */
+    var importStride: Int = 1
+
+    /** The file's real pixel size, even when the document was sampled down. */
+    var sourceWidth: Int = 0
+    var sourceHeight: Int = 0
     var notes: MutableList<String> = mutableListOf()
 
     /** Image resource section, kept byte-for-byte (colour profile, guides, metadata). */

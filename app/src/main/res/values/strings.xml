@@ -18,6 +18,8 @@
 
     <!-- tools -->
     <string name="size_value">%1$d px</string>
+    <string name="opacity">Opacity</string>
+    <string name="layers_count">%1$d layers</string>
     <string name="opacity_value">Opacity %1$d%%</string>
     <string name="blend_mode">Blend mode</string>
     <string name="colour">Colour</string>
@@ -76,4 +78,31 @@
     <string name="unsaved_title">Unsaved changes</string>
     <string name="unsaved_message">This document has changes that were not saved.</string>
     <string name="discard">Discard</string>
+    <string name="canvas_out_of_memory">Not enough memory to show this document on this device at full size. It was opened at a lower resolution.</string>
+    <string name="empty_open_hint">Layers, masks and text come along for the ride</string>
+    <string name="empty_new_hint">Start a blank canvas and pick a size</string>
+    <string name="empty_import_hint">Bring a photo in as its own layer</string>
+    <string name="empty_tagline">Fully offline: nothing you open ever leaves this phone</string>
+    <string name="option_size">Size</string>
+    <string name="option_hardness">Hardness</string>
+    <string name="option_flow">Flow</string>
+    <string name="option_tolerance">Tolerance</string>
+    <string name="option_colour">Colour</string>
+    <string name="pick">Pick</string>
+    <string name="tool_move">Move</string>
+    <string name="tool_brush">Brush</string>
+    <string name="tool_eraser">Eraser</string>
+    <string name="tool_fill">Fill</string>
+    <string name="tool_eyedropper">Eyedropper</string>
+    <string name="tool_text">Text</string>
+    <string name="tool_crop">Crop</string>
+    <string name="new_size">Size</string>
+    <string name="new_summary">%1$.1f megapixels · about %2$d MB in memory</string>
+    <string name="background_transparent">Transparent</string>
+    <string name="background_white">White</string>
+    <string name="background_black">Black</string>
+    <string name="quality">JPEG quality</string>
+    <string name="export_format">Format</string>
+    <string name="export_scale">Size</string>
+    <string name="opened_downscaled">opened at %1$d × %2$d, sampled down to fit memory</string>
 </resources>

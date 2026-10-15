@@ -27,6 +27,8 @@ import com.photocc.app.core.TextLayer
 import com.photocc.app.doc.Session
 import com.photocc.app.platform.AndroidText
 import java.io.ByteArrayOutputStream
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * The single activity: an open document, a canvas, and everything reachable with
@@ -39,11 +41,23 @@ import java.io.ByteArrayOutputStream
  */
 class MainActivity : Activity() {
 
+    companion object {
+        /** Largest image the editor will decode/import (same budget as the PSD reader). */
+        private const val MAX_IMPORT_PIXELS = 24_000_000L
+
+        /** Largest bitmap PNG/JPEG export will produce; bigger canvases are scaled down. */
+        private const val MAX_EXPORT_PIXELS = 24_000_000L
+    }
+
+
     private lateinit var editor: EditorView
     private lateinit var toolOptions: ToolOptions
     private lateinit var layerPanel: LayerPanel
     private lateinit var root: FrameLayout
     private lateinit var status: TextView
+    private lateinit var statusDetail: TextView
+    private lateinit var zoomChip: TextView
+    private lateinit var swatchButton: android.widget.ImageButton
     private lateinit var toolButtons: MutableMap<EditorView.Tool, android.widget.ImageButton>
     private lateinit var undoButton: android.widget.ImageButton
     private lateinit var redoButton: android.widget.ImageButton
@@ -77,16 +91,18 @@ class MainActivity : Activity() {
     /* ----------------------------------------------------------------- UI */
 
     private fun buildUi(): View {
-        root = FrameLayout(this)
-        root.setBackgroundColor(Ui.BACKGROUND)
+        root = FrameLayout(this).apply { setBackgroundColor(Ui.BACKGROUND) }
 
-        editor = EditorView(this)
-        editor.onMessage = { message -> toast(message) }
-        editor.onTextTapped = { layer -> editText(layer) }
-        editor.onPickColor = { color ->
-            paintColor = color
-            toolOptions.bind(editor.tool, editor.brushSize, paintColor)
-            toast(getString(R.string.picked_colour, String.format("#%06X", color and 0xFFFFFF)))
+        editor = EditorView(this).apply {
+            onMessage = { message -> snack(message) }
+            onTextTapped = { layer -> editText(layer) }
+            onPickColor = { color ->
+                paintColor = color
+                toolOptions.bind(editor.tool, editor.brushSize, paintColor)
+                refreshSwatch()
+                snack(getString(R.string.picked_colour, String.format("#%06X", color and 0xFFFFFF)))
+            }
+            onViewportChanged = { updateZoomChip() }
         }
         root.addView(
             editor,
@@ -94,47 +110,104 @@ class MainActivity : Activity() {
         )
 
         root.addView(buildTopBar())
-        root.addView(buildBottomBar())
+        root.addView(buildZoomStack())
+        root.addView(buildBottomArea())
         root.addView(buildLayerPanel())
+
         emptyState = buildEmptyState()
         root.addView(emptyState)
         return root
     }
 
-    private fun buildTopBar(): View = Ui.row(this, 0).apply {
-        setBackgroundColor(0xE623252B.toInt())
-        setPadding(Ui.dp(this@MainActivity, 6f), Ui.dp(this@MainActivity, 6f), Ui.dp(this@MainActivity, 6f), Ui.dp(this@MainActivity, 6f))
-        val menuButton = Ui.iconButton(this@MainActivity, Glyph.Menu) { showMainMenu(root) }
-        addView(menuButton)
-        status = Ui.label(this@MainActivity, getString(R.string.no_document), 13f, Ui.TEXT_DIM).apply {
+    /**
+     * The top bar: a floating pill holding the document identity on the left and
+     * undo/redo on the right. Everything else moved to the bottom dock, so the
+     * top of the screen stays free for the canvas.
+     */
+    private fun buildTopBar(): View {
+        val margin = Ui.dp(this, 10f)
+        val bar = Ui.floatingBar(this, Ui.RADIUS_LG).apply {
+            setPadding(Ui.dp(this@MainActivity, 4f), Ui.dp(this@MainActivity, 4f), Ui.dp(this@MainActivity, 6f), Ui.dp(this@MainActivity, 4f))
+        }
+        bar.addView(Ui.iconButton(this, Glyph.Menu, Ui.TEXT, 46) { showMainMenu(bar) })
+
+        val identity = Ui.column(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(Ui.dp(this@MainActivity, 6f), 0, 0, 0)
+        }
+        status = Ui.label(this, getString(R.string.no_document), 15f, Ui.TEXT, medium = true).apply {
             ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
         }
-        addView(status)
-        undoButton = Ui.iconButton(this@MainActivity, Glyph.Undo) { session?.undo(); refreshUi() }
-        redoButton = Ui.iconButton(this@MainActivity, Glyph.Redo) { session?.redo(); refreshUi() }
-        addView(undoButton)
-        addView(redoButton)
-        addView(Ui.iconButton(this@MainActivity, Glyph.Layers) { togglePanel() })
-        layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
-            gravity = Gravity.TOP
-        }
+        statusDetail = Ui.label(this, getString(R.string.app_name), 11f, Ui.TEXT_FAINT, mono = false)
+        identity.addView(status)
+        identity.addView(statusDetail)
+        bar.addView(identity)
+
+        undoButton = Ui.iconButton(this, Glyph.Undo) { session?.undo(); refreshUi() }
+        redoButton = Ui.iconButton(this, Glyph.Redo) { session?.redo(); refreshUi() }
+        bar.addView(undoButton)
+        bar.addView(redoButton)
+
+        Ui.place(bar, Gravity.TOP or Gravity.START, start = margin, end = margin, top = margin)
+        (bar.layoutParams as FrameLayout.LayoutParams).width = FrameLayout.LayoutParams.MATCH_PARENT
+        return bar
     }
 
-    private fun buildBottomBar(): View = Ui.column(this).apply {
-        setBackgroundColor(Ui.SURFACE)
-        toolOptions = ToolOptions(this@MainActivity).apply {
+    /**
+     * Zoom controls, floating on the right edge: in, fit, out, plus a live
+     * readout. Double-tap on the canvas does the same thing, but a visible
+     * control is what people reach for first.
+     */
+    private fun buildZoomStack(): View {
+        val zoomIn = Ui.iconButton(this, Glyph.Add, Ui.TEXT, 46) { editor.zoomBy(1.35f); updateZoomChip() }
+        val fit = Ui.iconButton(this, Glyph.Fit, Ui.TEXT, 46) { editor.fitToScreen(); updateZoomChip() }
+        val zoomOut = Ui.iconButton(this, Glyph.Remove, Ui.TEXT, 46) { editor.zoomBy(1f / 1.35f); updateZoomChip() }
+        zoomChip = Ui.label(this, "100%", 11.5f, Ui.TEXT, medium = true, mono = true).apply {
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(Ui.dp(this@MainActivity, 46f), Ui.dp(this@MainActivity, 24f))
+            setOnClickListener { editor.zoomTo100Percent(); updateZoomChip() }
+        }
+        val stack = Ui.stack(this, zoomChip, zoomIn, fit, zoomOut)
+        Ui.place(stack, Gravity.END or Gravity.CENTER_VERTICAL, end = Ui.dp(this, 10f))
+        return stack
+    }
+
+    /** Contextual options on top, the tool dock underneath. */
+    private fun buildBottomArea(): View {
+        val area = Ui.column(this).apply {
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
+                gravity = Gravity.BOTTOM
+                bottomMargin = Ui.dp(this@MainActivity, 10f)
+                marginStart = Ui.dp(this@MainActivity, 10f)
+                marginEnd = Ui.dp(this@MainActivity, 10f)
+            }
+            setClipToPadding(false)
+        }
+
+        toolOptions = ToolOptions(this).apply {
             onSize = { value -> editor.brushSize = value }
             onHardness = { value -> editor.brushHardness = value }
             onFlow = { value -> editor.brushFlow = value }
             onTolerance = { value -> editor.fillTolerance = value }
-            onPickColor = { pickColour() { color -> applyPaintColour(color) } }
+            onPickColor = { pickColour { color -> applyPaintColour(color) } }
         }
-        addView(toolOptions)
+        val optionsStrip = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            background = Ui.roundedStroke(Ui.SURFACE, Ui.OUTLINE, 1f, Ui.RADIUS_LG)
+            addView(toolOptions, android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            ))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = Ui.dp(this@MainActivity, 8f)
+            }
+        }
+        area.addView(optionsStrip)
 
-        val tools = Ui.row(this@MainActivity, 0).apply {
-            setPadding(Ui.dp(this@MainActivity, 4f), 0, Ui.dp(this@MainActivity, 4f), Ui.dp(this@MainActivity, 4f))
+        val dock = Ui.floatingBar(this, Ui.RADIUS_LG).apply {
+            setPadding(Ui.dp(this@MainActivity, 6f), Ui.dp(this@MainActivity, 6f), Ui.dp(this@MainActivity, 6f), Ui.dp(this@MainActivity, 6f))
         }
+        val toolsRow = Ui.row(this, 0)
         toolButtons = HashMap()
         val order = listOf(
             EditorView.Tool.MOVE to Glyph.Move,
@@ -146,17 +219,35 @@ class MainActivity : Activity() {
             EditorView.Tool.CROP to Glyph.Crop,
         )
         for ((tool, glyph) in order) {
-            val button = Ui.iconButton(this@MainActivity, glyph, Ui.TEXT_DIM, 44) { selectTool(tool) }
+            val button = toolButton(tool, glyph)
             toolButtons[tool] = button
-            tools.addView(button)
+            toolsRow.addView(button)
         }
-        tools.addView(Ui.spacer(this@MainActivity, 0.2f))
-        tools.addView(Ui.iconButton(this@MainActivity, Glyph.Fit) { editor.fitToScreen() })
-        addView(tools)
-        layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
-            gravity = Gravity.BOTTOM
-        }
+        dock.addView(
+            android.widget.HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(toolsRow)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
+        dock.addView(Ui.divider(this, vertical = true).apply {
+            layoutParams = LinearLayout.LayoutParams(Ui.dp(this@MainActivity, 1f), Ui.dp(this@MainActivity, 30f)).apply {
+                marginStart = Ui.dp(this@MainActivity, 4f)
+                marginEnd = Ui.dp(this@MainActivity, 4f)
+            }
+        })
+        swatchButton = Ui.iconButton(this, Glyph.Sliders, Ui.TEXT, 46) { pickColour { color -> applyPaintColour(color) } }
+        dock.addView(swatchButton)
+        dock.addView(Ui.iconButton(this, Glyph.Layers, Ui.TEXT, 46) { togglePanel() })
+        area.addView(dock)
+        return area
     }
+
+    /** A tool icon that carries its active state as a tinted pill. */
+    private fun toolButton(tool: EditorView.Tool, glyph: Glyph): android.widget.ImageButton =
+        Ui.iconButton(this, glyph, Ui.TEXT_DIM, 46) { selectTool(tool) }.apply {
+            background = Ui.rounded(android.graphics.Color.TRANSPARENT, Ui.RADIUS_MD)
+        }
 
     private fun buildLayerPanel(): View {
         layerPanel = LayerPanel(this, Session(PsdDocument(1, 1))).apply {
@@ -232,38 +323,98 @@ class MainActivity : Activity() {
                 }.show()
             }
         }
-        val params = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, Ui.dp(this, 340f)).apply {
+        val params = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, Ui.dp(this, 380f)).apply {
             gravity = Gravity.BOTTOM
         }
         layerPanel.layoutParams = params
         return layerPanel
     }
 
-    private fun buildEmptyState(): View = Ui.column(this).apply {
-        gravity = Gravity.CENTER
-        setBackgroundColor(Ui.BACKGROUND)
-        addView(Ui.label(this@MainActivity, getString(R.string.empty_title), 20f).apply { gravity = Gravity.CENTER })
-        addView(
-            Ui.label(this@MainActivity, getString(R.string.empty_hint), 13f, Ui.TEXT_DIM).apply {
+    /** The first thing anyone sees: what the app is, and the three ways in. */
+    private fun buildEmptyState(): View {
+        val column = Ui.column(this).apply {
+            gravity = Gravity.CENTER
+            setBackgroundColor(Ui.BACKGROUND)
+            setPadding(Ui.dp(this@MainActivity, 20f), Ui.dp(this@MainActivity, 40f), Ui.dp(this@MainActivity, 20f), Ui.dp(this@MainActivity, 24f))
+        }
+        val mark = android.widget.ImageView(this).apply {
+            val box = Ui.dp(this@MainActivity, 84f)
+            layoutParams = LinearLayout.LayoutParams(box, box).apply { gravity = Gravity.CENTER_HORIZONTAL }
+            setPadding(Ui.dp(this@MainActivity, 14f), Ui.dp(this@MainActivity, 14f), Ui.dp(this@MainActivity, 14f), Ui.dp(this@MainActivity, 14f))
+            setImageDrawable(GlyphDrawable(Glyph.Layers, Ui.ACCENT))
+            background = Ui.roundedStroke(Ui.SURFACE, Ui.OUTLINE, 1f, Ui.RADIUS_LG)
+        }
+        column.addView(mark)
+        column.addView(
+            Ui.label(this, getString(R.string.empty_title), 22f, Ui.TEXT, medium = true).apply {
                 gravity = Gravity.CENTER
-                setPadding(0, Ui.dp(this@MainActivity, 12f), 0, Ui.dp(this@MainActivity, 16f))
-            },
-        )
-        addView(Ui.textButton(this@MainActivity, getString(R.string.open_psd)) { pickDocument(openPsd) })
-        addView(
-            Ui.label(this@MainActivity, getString(R.string.new_document), 15f).apply {
                 setPadding(0, Ui.dp(this@MainActivity, 18f), 0, 0)
-                gravity = Gravity.CENTER
-                setOnClickListener { newDocument() }
             },
         )
-        addView(
-            Ui.label(this@MainActivity, getString(R.string.import_image), 15f).apply {
-                setPadding(0, Ui.dp(this@MainActivity, 12f), 0, 0)
+        column.addView(
+            Ui.label(this, getString(R.string.empty_hint), 13f, Ui.TEXT_DIM).apply {
                 gravity = Gravity.CENTER
-                setOnClickListener { pickDocument(importImage) }
+                isSingleLine = false
+                maxLines = 3
+                setPadding(Ui.dp(this@MainActivity, 12f), Ui.dp(this@MainActivity, 8f), Ui.dp(this@MainActivity, 12f), Ui.dp(this@MainActivity, 22f))
             },
         )
+        val card = Ui.card(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+        }
+        card.addView(
+            Ui.menuRow(this, Glyph.Open, getString(R.string.open_psd), getString(R.string.empty_open_hint), accent = true) {
+                pickDocument(openPsd)
+            },
+        )
+        card.addView(Ui.divider(this))
+        card.addView(Ui.menuRow(this, Glyph.New, getString(R.string.new_document), getString(R.string.empty_new_hint)) { newDocument() })
+        card.addView(Ui.divider(this))
+        card.addView(Ui.menuRow(this, Glyph.Image, getString(R.string.import_image), getString(R.string.empty_import_hint)) { pickDocument(importImage) })
+        column.addView(card)
+        column.addView(
+            Ui.label(this, getString(R.string.empty_tagline), 11.5f, Ui.TEXT_FAINT).apply {
+                gravity = Gravity.CENTER
+                isSingleLine = false
+                maxLines = 2
+                setPadding(0, Ui.dp(this@MainActivity, 18f), 0, 0)
+            },
+        )
+        return android.widget.ScrollView(this).apply {
+            setBackgroundColor(Ui.BACKGROUND)
+            addView(column)
+        }
+    }
+
+    /* ------------------------------------------------------------ chrome bits */
+
+    /** Keeps the zoom readout honest while gestures change the viewport. */
+    private fun updateZoomChip() {
+        val chip = zoomChip ?: return
+        val zoom = editor.currentZoom()
+        val percent = (zoom * 100f).roundToInt()
+        chip.text = if (percent >= 100) "$percent%" else "${(zoom * 100f).roundToInt()}%"
+        chip.setTextColor(if (percent == 100) Ui.TEXT_DIM else Ui.TEXT)
+    }
+
+    /** Paints the current colour onto the dock swatch button. */
+    private fun refreshSwatch() {
+        val button = swatchButton ?: return
+        val chip = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(paintColor)
+            setStroke(Ui.dp(this@MainActivity, 2f), Ui.OUTLINE)
+        }
+        button.setImageDrawable(chip)
+        button.scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+        button.setPadding(Ui.dp(this@MainActivity, 13f), Ui.dp(this@MainActivity, 13f), Ui.dp(this@MainActivity, 13f), Ui.dp(this@MainActivity, 13f))
+    }
+
+    private fun snack(message: String) {
+        Ui.snack(root, this, message)
     }
 
     /* --------------------------------------------------------------- menu */
@@ -298,8 +449,13 @@ class MainActivity : Activity() {
     private fun selectTool(tool: EditorView.Tool) {
         editor.tool = tool
         for ((each, button) in toolButtons) {
-            button.setImageDrawable(GlyphDrawable(glyphOf(each), if (each == tool) Ui.ACCENT else Ui.TEXT_DIM))
-            button.background = if (each == tool) Ui.rounded(0x22FFB74D, Ui.dp(this, 12f).toFloat()) else null
+            val active = each == tool
+            button.setImageDrawable(GlyphDrawable(glyphOf(each), if (active) Ui.ACCENT else Ui.TEXT_DIM))
+            button.background = if (active) {
+                Ui.rounded(Ui.ACCENT_SOFT, Ui.dp(this, 14f).toFloat())
+            } else {
+                Ui.rounded(android.graphics.Color.TRANSPARENT, Ui.dp(this, 14f).toFloat())
+            }
         }
         toolOptions.bind(tool, editor.brushSize, paintColor)
     }
@@ -407,8 +563,7 @@ class MainActivity : Activity() {
         busy = true
         Thread {
             val result = runCatching {
-                val bitmap = contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) }
-                    ?: throw IllegalStateException(getString(R.string.error_unreadable))
+                val bitmap = decodeImageScaled(uri)
                 val pixels = Pixels(bitmap.width, bitmap.height, IntArray(bitmap.width * bitmap.height))
                 bitmap.getPixels(pixels.data, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
                 val name = displayName(uri) ?: "image"
@@ -506,7 +661,7 @@ class MainActivity : Activity() {
                 } else {
                     val (format, settings) = export
                     val (quality, scale) = settings
-                    val bitmap = flattenToBitmap(session, scale)
+                    val bitmap = flattenToBitmap(session, scale, if (format == ExportFormat.Jpeg) Argb.OPAQUE_WHITE else 0)
                     val stream = ByteArrayOutputStream()
                     val ok = bitmap.compress(
                         if (format == ExportFormat.Png) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG,
@@ -538,23 +693,67 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    /** Composites the document into a bitmap at an optional scale, for PNG/JPEG export. */
-    private fun flattenToBitmap(session: Session, scale: Float): Bitmap {
+    /**
+     * Composites the document straight into an export-sized bitmap.
+     *
+     * The old version allocated a **document-sized** `IntArray` (192 MB for a
+     * 48 MPix poster) and then nearest-neighbour scaled it. [Render.flattenScaled]
+     * composites band by band and box-filters into the target buffer, so peak
+     * memory is the exported bitmap and a couple of megapixels of scratch.
+     */
+    private fun flattenToBitmap(session: Session, scale: Float, background: Int): Bitmap {
         val doc = session.doc
-        val width = (doc.width * scale).toInt().coerceAtLeast(1)
-        val height = (doc.height * scale).toInt().coerceAtLeast(1)
-        val full = IntArray(doc.width * doc.height)
-        Render.flatten(doc, Rect(0, 0, doc.width, doc.height), full)
-        if (scale >= 0.999f) return AndroidText.toBitmap(full, doc.width, doc.height)
-        val scaled = IntArray(width * height)
-        for (y in 0 until height) {
-            val sourceY = (y / scale).toInt().coerceIn(0, doc.height - 1)
-            for (x in 0 until width) {
-                val sourceX = (x / scale).toInt().coerceIn(0, doc.width - 1)
-                scaled[y * width + x] = full[sourceY * doc.width + sourceX]
+        var effective = scale.coerceIn(0.01f, 1f)
+        val target = doc.width.toDouble() * doc.height.toDouble() * effective.toDouble() * effective.toDouble()
+        if (target > MAX_EXPORT_PIXELS) {
+            effective *= kotlin.math.sqrt(MAX_EXPORT_PIXELS.toDouble() / target).toFloat()
+        }
+        val width = max(1, (doc.width * effective).roundToInt())
+        val height = max(1, (doc.height * effective).roundToInt())
+        val pixels = IntArray(width * height)
+        Render.flattenScaled(doc, Rect(0, 0, doc.width, doc.height), pixels, width, height, background)
+        return AndroidText.toBitmap(pixels, width, height)
+    }
+
+    /**
+     * Decodes an image file, downsampling while decoding.
+     *
+     * `BitmapFactory.decodeStream` on a modern 50 MPix camera JPEG allocates
+     * ~200 MB and takes the whole app down; measuring the bounds first and
+     * setting `inSampleSize` keeps the decoded bitmap inside [MAX_IMPORT_PIXELS].
+     * If even that fails, the sample size is doubled and retried.
+     */
+    private fun decodeImageScaled(uri: Uri): Bitmap {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+            ?: throw IllegalStateException(getString(R.string.error_unreadable))
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw IllegalStateException(getString(R.string.error_unreadable))
+        }
+        val options = android.graphics.BitmapFactory.Options()
+        options.inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight)
+        options.inPreferredConfig = Bitmap.Config.ARGB_8888
+        var attempt = 0
+        while (true) {
+            try {
+                return contentResolver.openInputStream(uri)?.use {
+                    android.graphics.BitmapFactory.decodeStream(it, null, options)
+                } ?: throw IllegalStateException(getString(R.string.error_unreadable))
+            } catch (oom: OutOfMemoryError) {
+                if (attempt >= 3) throw OutOfMemoryError(getString(R.string.canvas_out_of_memory))
+                attempt++
+                options.inSampleSize = max(2, options.inSampleSize * 2)
             }
         }
-        return AndroidText.toBitmap(scaled, width, height)
+    }
+
+    /** The power-of-two downsample factor that keeps a decoded image within budget. */
+    private fun sampleSizeFor(width: Int, height: Int): Int {
+        var sample = 1
+        while (width.toLong() * height.toLong() / (sample.toLong() * sample) > MAX_IMPORT_PIXELS && sample < 64) {
+            sample *= 2
+        }
+        return sample
     }
 
     /* ------------------------------------------------------------------ text */
@@ -683,16 +882,32 @@ class MainActivity : Activity() {
         undoButton.alpha = if (undoButton.isEnabled) 1f else 0.35f
         redoButton.isEnabled = session?.canRedo == true
         redoButton.alpha = if (redoButton.isEnabled) 1f else 0.35f
-        status.text = session?.let { doc ->
-            val dirty = if (doc.doc.dirty) " •" else ""
-            "${doc.title}$dirty"
-        } ?: getString(R.string.no_document)
+        if (session == null) {
+            status.text = getString(R.string.no_document)
+            statusDetail.text = getString(R.string.app_name)
+        } else {
+            val document = session.doc
+            val dirty = if (document.dirty) "  •" else ""
+            status.text = session.title + dirty
+            // The meta line is where the awkward facts live: real pixel size vs the
+            // resolution the document was actually opened at, and the live zoom.
+            val meta = StringBuilder("${document.width} × ${document.height} px")
+            if (document.importStride > 1 && document.sourceWidth > 0) {
+                meta.append("  ·  ")
+                meta.append(getString(R.string.opened_downscaled, document.sourceWidth, document.sourceHeight))
+            }
+            meta.append("  ·  ")
+            meta.append((editor.currentZoom() * 100f).roundToInt()).append('%')
+            statusDetail.text = meta.toString()
+        }
         emptyState.visibility = if (session == null) View.VISIBLE else View.GONE
         editor.invalidateContent()
     }
 
     private fun toast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        // Snackbars, not system toasts: the app has its own voice and its own theme.
+        if (::root.isInitialized) Ui.snack(root, this, message)
+        else Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
     override fun onBackPressed() {

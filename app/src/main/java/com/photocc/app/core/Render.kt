@@ -1,6 +1,8 @@
 package com.photocc.app.core
 
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -33,6 +35,104 @@ object Render {
 
     /** Flattens every visible layer of `doc` within `region` into `out`. */
     fun flatten(doc: PsdDocument, region: Rect, out: IntArray, background: Int = 0) {
+        java.util.Arrays.fill(out, 0, region.w * region.h, background)
+        composite(doc.children, region, out)
+    }
+
+    /**
+     * Composites `region` (document space) into an output grid of `outW × outH`.
+     *
+     * This is what the canvas and the exporter use, because it is the difference
+     * between working and dying on a phone: the output is sized to the *screen*
+     * (or to the export size), never to the document. A 60 MPix poster viewed on
+     * a 1080p phone composites into ~2 Mpix of memory instead of 240 MB.
+     *
+     * When the output is smaller than the region, the document is composited in
+     * horizontal bands at full resolution and each band is box-filtered down.
+     * Averaging happens in premultiplied space, so transparent pixels cannot
+     * bleed their colour into the result.
+     */
+    fun flattenScaled(
+        doc: PsdDocument,
+        region: Rect,
+        out: IntArray,
+        outW: Int,
+        outH: Int,
+        background: Int = 0,
+    ) {
+        if (outW <= 0 || outH <= 0 || region.w <= 0 || region.h <= 0) return
+        if (outW == region.w && outH == region.h) {
+            flatten(doc, region, out, background)
+            return
+        }
+        val stepX = region.w.toDouble() / outW
+        val stepY = region.h.toDouble() / outH
+
+        // Band height: keep the full-resolution band buffer near 2 Mpix, whatever
+        // the document and output sizes are.
+        val maxBandRows = max(1, (2_000_000 / max(1, region.w)))
+        val rowsPerBand = max(1, min(outH, (maxBandRows / max(1.0, stepY)).toInt()))
+
+        var oy = 0
+        while (oy < outH) {
+            val oyEnd = min(outH, oy + rowsPerBand)
+            val bandTop = region.y + floor(oy * stepY).toInt()
+            val bandBottom = max(bandTop + 1, region.y + ceil(oyEnd * stepY).toInt())
+            val bandRows = bandBottom - bandTop
+            val band = IntArray(region.w * bandRows)
+            java.util.Arrays.fill(band, 0, band.size, background)
+            composite(doc.children, Rect(region.x, bandTop, region.w, bandRows), band)
+
+            for (y in oy until oyEnd) {
+                val y0 = (region.y + floor(y * stepY).toInt() - bandTop).coerceIn(0, bandRows - 1)
+                val y1 = (region.y + ceil((y + 1) * stepY).toInt() - bandTop).coerceIn(y0 + 1, bandRows)
+                val outRow = y * outW
+                for (x in 0 until outW) {
+                    val x0 = (floor(x * stepX).toInt()).coerceIn(0, region.w - 1)
+                    val x1 = (ceil((x + 1) * stepX).toInt()).coerceIn(x0 + 1, region.w)
+                    var alpha = 0
+                    var premulR = 0
+                    var premulG = 0
+                    var premulB = 0
+                    var samples = 0
+                    for (py in y0 until y1) {
+                        val rowBase = py * region.w
+                        for (px in x0 until x1) {
+                            val value = band[rowBase + px]
+                            val a = (value ushr 24) and 0xFF
+                            if (a != 0) {
+                                alpha += a
+                                premulR += a * ((value ushr 16) and 0xFF)
+                                premulG += a * ((value ushr 8) and 0xFF)
+                                premulB += a * (value and 0xFF)
+                            }
+                            samples++
+                        }
+                    }
+                    out[outRow + x] = if (alpha == 0 || samples == 0) {
+                        background
+                    } else {
+                        Argb.pack(
+                            (alpha + samples / 2) / samples,
+                            (premulR + alpha / 2) / alpha,
+                            (premulG + alpha / 2) / alpha,
+                            (premulB + alpha / 2) / alpha,
+                        )
+                    }
+                }
+            }
+            oy = oyEnd
+        }
+    }
+
+    /**
+     * Composites one horizontal band of the document at full resolution.
+     * The writer and the exporter walk a document band by band with this, which
+     * is how a document-sized image is produced without a document-sized buffer.
+     */
+    fun flattenBand(doc: PsdDocument, y: Int, rows: Int, out: IntArray, background: Int = 0) {
+        if (rows <= 0 || out.size < doc.width * rows) return
+        val region = Rect(0, y, doc.width, rows)
         java.util.Arrays.fill(out, 0, region.w * region.h, background)
         composite(doc.children, region, out)
     }

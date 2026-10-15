@@ -51,8 +51,9 @@ class LayerPanel(context: Context, private var session: Session) : LinearLayout(
     var onRename: ((Layer) -> Unit)? = null
     var onClose: (() -> Unit)? = null
 
-    private val rows = Ui.column(context)
+    private val rows = Ui.column(context).apply { setPadding(0, Ui.dp(context, 6f), 0, Ui.dp(context, 6f)) }
     private val scroller = ScrollView(context)
+    private lateinit var countChip: TextView
     private val opacityLabel = Ui.label(context, "", 12f, Ui.TEXT_DIM)
     private val blendButton = Ui.label(context, "", 13f)
     private val opacitySlider = android.widget.SeekBar(context).apply {
@@ -84,8 +85,29 @@ class LayerPanel(context: Context, private var session: Session) : LinearLayout(
 
     init {
         orientation = VERTICAL
-        setBackgroundColor(Ui.SURFACE)
-
+        // A sheet, not a slab: rounded top corners, a drag handle, and a lift off
+        // the canvas so it reads as something that slid up over the document.
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(Ui.SURFACE)
+            cornerRadii = floatArrayOf(
+                Ui.dp(context, 22f).toFloat(), Ui.dp(context, 22f).toFloat(),
+                Ui.dp(context, 22f).toFloat(), Ui.dp(context, 22f).toFloat(),
+                0f, 0f, 0f, 0f,
+            )
+            setStroke(Ui.dp(context, 1f), Ui.OUTLINE)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+            elevation = Ui.dp(context, 12f).toFloat()
+        }
+        addView(
+            View(context).apply {
+                layoutParams = LayoutParams(Ui.dp(context, 36f), Ui.dp(context, 4f)).apply {
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    topMargin = Ui.dp(context, 8f)
+                }
+                background = Ui.rounded(0x33FFFFFF, Ui.RADIUS_PILL)
+            },
+        )
         addView(buildHeader())
         addView(buildActions())
         addView(Ui.divider(context))
@@ -98,41 +120,81 @@ class LayerPanel(context: Context, private var session: Session) : LinearLayout(
         refresh()
     }
 
-    private fun buildHeader(): View = Ui.row(context).apply {
-        setPadding(Ui.dp(context, 12f), Ui.dp(context, 8f), Ui.dp(context, 8f), 0)
-        addView(Ui.label(context, context.getString(R.string.layers), 16f))
+    private fun buildHeader(): View = Ui.row(context, Ui.dp(context, 8f)).apply {
+        setPadding(Ui.dp(context, 16f), Ui.dp(context, 6f), Ui.dp(context, 8f), Ui.dp(context, 6f))
+        addView(Ui.label(context, context.getString(R.string.layers), 17f, Ui.TEXT, medium = true))
+        countChip = Ui.label(context, "", 11.5f, Ui.TEXT_DIM, medium = true).apply {
+            gravity = Gravity.CENTER
+            setPadding(Ui.dp(context, 10f), Ui.dp(context, 4f), Ui.dp(context, 10f), Ui.dp(context, 4f))
+            background = Ui.rounded(Ui.SURFACE_MAX, Ui.RADIUS_PILL)
+        }
+        addView(countChip)
         addView(Ui.spacer(context))
-        addView(Ui.iconButton(context, Glyph.Close, Ui.TEXT_DIM, 40) { onClose?.invoke() })
+        addView(Ui.iconButton(context, Glyph.Close, Ui.TEXT_DIM, 44) { onClose?.invoke() })
     }
 
-    private fun buildActions(): View = Ui.row(context, Ui.dp(context, 4f)).apply {
-        addView(Ui.iconButton(context, Glyph.Image) { onAddRaster?.invoke() })
-        addView(Ui.iconButton(context, Glyph.Text) { onAddText?.invoke() })
-        addView(Ui.iconButton(context, Glyph.Group) { onAddGroup?.invoke() })
-        addView(Ui.iconButton(context, Glyph.Duplicate) { onDuplicate?.invoke() })
-        addView(Ui.iconButton(context, Glyph.Up) { onMoveUp?.invoke() })
-        addView(Ui.iconButton(context, Glyph.Down) { onMoveDown?.invoke() })
-        addView(Ui.iconButton(context, Glyph.Merge) { onMerge?.invoke() })
-        addView(Ui.iconButton(context, Glyph.Flatten) { onFlatten?.invoke() })
-        addView(Ui.iconButton(context, Glyph.Trash, Ui.DANGER) { onDelete?.invoke() })
+    /** The layer commands: add on the left, destructive on the right, scrollable on small screens. */
+    private fun buildActions(): View {
+        val strip = Ui.row(context, Ui.dp(context, 2f)).apply {
+            setPadding(Ui.dp(context, 6f), Ui.dp(context, 2f), Ui.dp(context, 6f), Ui.dp(context, 2f))
+        }
+        for ((glyph, action) in listOf(
+            Glyph.Image to onAddRaster,
+            Glyph.Text to onAddText,
+            Glyph.Group to onAddGroup,
+            Glyph.Duplicate to onDuplicate,
+            Glyph.Up to onMoveUp,
+            Glyph.Down to onMoveDown,
+            Glyph.Merge to onMerge,
+            Glyph.Flatten to onFlatten,
+        )) {
+            strip.addView(Ui.iconButton(context, glyph, Ui.TEXT, 46) { action?.invoke() })
+        }
+        strip.addView(Ui.divider(context, vertical = true).apply {
+            layoutParams = LayoutParams(Ui.dp(context, 1f), Ui.dp(context, 26f)).apply {
+                marginStart = Ui.dp(context, 4f)
+                marginEnd = Ui.dp(context, 4f)
+            }
+        })
+        strip.addView(Ui.iconButton(context, Glyph.Trash, Ui.DANGER, 46) { onDelete?.invoke() })
+        return android.widget.HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(strip)
+        }
     }
 
     private fun buildFooter(): View = Ui.column(context).apply {
-        setPadding(Ui.dp(context, 14f), Ui.dp(context, 6f), Ui.dp(context, 14f), Ui.dp(context, 10f))
+        setPadding(Ui.dp(context, 16f), Ui.dp(context, 8f), Ui.dp(context, 16f), Ui.dp(context, 12f))
         addView(
             Ui.row(context).apply {
-                opacityLabel.text = context.getString(R.string.opacity_value, 100)
-                addView(opacityLabel)
+                addView(Ui.sectionLabel(context, context.getString(R.string.blend_mode)))
                 addView(Ui.spacer(context))
-                blendButton.setPadding(Ui.dp(context, 12f), Ui.dp(context, 6f), Ui.dp(context, 12f), Ui.dp(context, 6f))
-                blendButton.background = Ui.rounded(Ui.SURFACE_HIGH, Ui.dp(context, 14f).toFloat())
+                blendButton.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12.5f)
+                blendButton.setTextColor(Ui.TEXT)
+                blendButton.typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                blendButton.setPadding(Ui.dp(context, 14f), Ui.dp(context, 8f), Ui.dp(context, 14f), Ui.dp(context, 8f))
+                blendButton.background = Ui.roundedStroke(Ui.SURFACE_HIGH, Ui.OUTLINE, 1f, Ui.RADIUS_PILL)
                 blendButton.setOnClickListener { showBlendMenu(blendButton) }
                 addView(blendButton)
             },
         )
-        addView(opacitySlider)
         addView(
             Ui.row(context).apply {
+                addView(Ui.sectionLabel(context, context.getString(R.string.opacity)))
+                addView(Ui.spacer(context))
+                opacityLabel.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+                opacityLabel.setTextColor(Ui.TEXT)
+                opacityLabel.typeface = android.graphics.Typeface.MONOSPACE
+                opacityLabel.text = context.getString(R.string.opacity_value, 100)
+                addView(opacityLabel)
+            },
+        )
+        opacitySlider.progressTintList = android.content.res.ColorStateList.valueOf(Ui.ACCENT)
+        opacitySlider.progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Ui.SURFACE_MAX)
+        opacitySlider.thumbTintList = android.content.res.ColorStateList.valueOf(Ui.TEXT)
+        addView(opacitySlider)
+        addView(
+            Ui.row(context, Ui.dp(context, 8f)).apply {
                 addView(Ui.textButton(context, context.getString(R.string.rename)) {
                     session.selected?.let { onRename?.invoke(it) }
                 })
@@ -166,6 +228,7 @@ class LayerPanel(context: Context, private var session: Session) : LinearLayout(
         val ordered = ArrayList<Pair<Layer, Int>>()
         collect(session.doc.children, 0, ordered)
         for ((layer, depth) in ordered) rows.addView(buildRow(layer, depth))
+        countChip.text = context.getString(R.string.layers_count, ordered.size)
         if (scroller.childCount == 0) scroller.addView(rows) else scroller.invalidate()
 
         val selected = session.selected
@@ -189,24 +252,32 @@ class LayerPanel(context: Context, private var session: Session) : LinearLayout(
 
     private fun buildRow(layer: Layer, depth: Int): View {
         val selected = layer.id == session.selectedId
-        val row = Ui.row(context, Ui.dp(context, 8f)).apply {
+        val row = Ui.row(context, Ui.dp(context, 10f)).apply {
             setPadding(
-                Ui.dp(context, 10f) + Ui.dp(context, 16f) * depth,
-                Ui.dp(context, 6f),
-                Ui.dp(context, 10f),
-                Ui.dp(context, 6f),
+                Ui.dp(context, 12f) + Ui.dp(context, 16f) * depth,
+                Ui.dp(context, 7f),
+                Ui.dp(context, 8f),
+                Ui.dp(context, 7f),
             )
-            background = if (selected) Ui.rounded(0x33FFB74D, Ui.dp(context, 12f).toFloat())
-            else Ui.rounded(Color.TRANSPARENT, 0f)
+            minimumHeight = Ui.dp(context, 60f)
+            background = if (selected) Ui.roundedStroke(Ui.SURFACE_HIGH, Ui.ACCENT_SOFT, 2f, Ui.RADIUS_MD)
+            else Ui.rounded(Color.TRANSPARENT, Ui.RADIUS_MD)
             isClickable = true
             setOnClickListener { session.select(layer.id) }
             setOnLongClickListener { onRename?.invoke(layer); true }
         }
 
         val thumb = ImageView(context).apply {
-            layoutParams = LayoutParams(Ui.dp(context, 44f), Ui.dp(context, 44f))
+            val box = Ui.dp(context, 44f)
+            layoutParams = LayoutParams(box, box)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setBackgroundColor(0xFF141519.toInt())
+            // Checkerboard behind the thumbnail so transparent layers are obvious.
+            background = android.graphics.drawable.LayerDrawable(
+                arrayOf(
+                    android.graphics.drawable.ColorDrawable(Ui.CHECKER_DARK),
+                    Ui.roundedStroke(Color.TRANSPARENT, Ui.OUTLINE, 1f, Ui.dp(context, 9f).toFloat()),
+                ),
+            )
             val bitmap = Thumbnails.of(layer, 44)
             if (bitmap != null) setImageBitmap(bitmap) else setImageDrawable(GlyphDrawable(Glyph.Layers, Ui.TEXT_DIM))
         }
@@ -214,7 +285,9 @@ class LayerPanel(context: Context, private var session: Session) : LinearLayout(
 
         val texts = Ui.column(context).apply {
             layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
-            addView(Ui.label(context, layer.name, 14f))
+            addView(Ui.label(context, layer.name, 14f, if (layer.visible) Ui.TEXT else Ui.TEXT_DIM, medium = true).apply {
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
             val detail = when (layer) {
                 is TextLayer -> context.getString(R.string.layer_type_text) + " · " + layer.text.psdFontName
                 is GroupLayer -> context.getString(R.string.layer_type_group) + " · " + layer.children.size
@@ -225,13 +298,13 @@ class LayerPanel(context: Context, private var session: Session) : LinearLayout(
                     "$size$mode"
                 }
             }
-            addView(Ui.label(context, detail, 11f, Ui.TEXT_DIM))
-            layer.unsupported?.let { addView(Ui.label(context, it, 10f, Ui.ACCENT)) }
+            addView(Ui.label(context, detail, 11.5f, Ui.TEXT_FAINT))
+            layer.unsupported?.let { addView(Ui.label(context, it, 10.5f, Ui.ACCENT)) }
         }
         row.addView(texts)
 
         row.addView(
-            Ui.iconButton(context, if (layer.visible) Glyph.Eye else Glyph.EyeOff, if (layer.visible) Ui.TEXT else Ui.TEXT_DIM, 38) {
+            Ui.iconButton(context, if (layer.visible) Glyph.Eye else Glyph.EyeOff, if (layer.visible) Ui.TEXT else Ui.TEXT_FAINT, 44) {
                 session.setVisible(layer.id, !layer.visible)
             },
         )
@@ -468,9 +541,12 @@ class ColorPickerView(context: Context, initial: Int) : LinearLayout(context) {
 }
 
 /**
- * Tool options strip: brush size/hardness/flow, fill tolerance and the current
- * colour. Only the controls that matter for the active tool are visible, which is
- * what keeps a 5-inch screen usable.
+ * Tool options strip.
+ *
+ * Only the controls that matter for the active tool are visible, and they are laid
+ * out as compact cards side by side inside the horizontally scrollable strip the
+ * activity provides. On a 5-inch phone that means one thumb-width of controls at a
+ * time instead of a wall of sliders.
  */
 class ToolOptions(context: Context) : LinearLayout(context) {
 
@@ -480,55 +556,78 @@ class ToolOptions(context: Context) : LinearLayout(context) {
     var onTolerance: ((Int) -> Unit)? = null
     var onPickColor: (() -> Unit)? = null
 
-    private val sizeLabel = Ui.label(context, "", 11f, Ui.TEXT_DIM)
-    private val sizeSlider = Ui.slider(context, 2, 200, 24) { value -> onSize?.invoke(value.toFloat()) }
-    private val hardnessSlider = Ui.slider(context, 0, 100, 80) { value -> onHardness?.invoke(value / 100f) }
-    private val flowSlider = Ui.slider(context, 5, 100, 100) { value -> onFlow?.invoke(value / 100f) }
-    private val toleranceSlider = Ui.slider(context, 0, 100, 32) { value -> onTolerance?.invoke(value) }
-    private val swatch = View(context)
-
-    init {
-        orientation = VERTICAL
-        setPadding(Ui.dp(context, 12f), Ui.dp(context, 6f), Ui.dp(context, 12f), Ui.dp(context, 6f))
-        setBackgroundColor(Ui.SURFACE)
+    private val toolName = Ui.label(context, "", 12f, Ui.ACCENT, medium = true)
+    private val sizeRow = Ui.SliderRow(context, context.getString(R.string.option_size), 2, 200, 24, { "$it px" }) { value ->
+        onSize?.invoke(value.toFloat())
+    }
+    private val hardnessRow = Ui.SliderRow(context, context.getString(R.string.option_hardness), 0, 100, 80, { "$it%" }) { value ->
+        onHardness?.invoke(value / 100f)
+    }
+    private val flowRow = Ui.SliderRow(context, context.getString(R.string.option_flow), 5, 100, 100, { "$it%" }) { value ->
+        onFlow?.invoke(value / 100f)
+    }
+    private val toleranceRow = Ui.SliderRow(context, context.getString(R.string.option_tolerance), 0, 100, 32, { "$it" }) { value ->
+        onTolerance?.invoke(value)
+    }
+    private val colourDot = View(context)
+    private val colourRow = Ui.column(context).apply {
+        minimumWidth = Ui.dp(context, 96f)
+        addView(Ui.sectionLabel(context, context.getString(R.string.option_colour)))
         addView(
-            Ui.row(context).apply {
-                sizeLabel.text = context.getString(R.string.size_value, 24)
-                addView(sizeLabel)
-                addView(Ui.spacer(context))
-                swatch.layoutParams = LayoutParams(Ui.dp(context, 32f), Ui.dp(context, 32f))
-                swatch.background = Ui.roundedStroke(Color.WHITE, 0x66FFFFFF, 1f, Ui.dp(context, 8f).toFloat())
-                swatch.setOnClickListener { onPickColor?.invoke() }
-                addView(swatch)
+            Ui.row(context, Ui.dp(context, 10f)).apply {
+                colourDot.apply {
+                    layoutParams = LayoutParams(Ui.dp(context, 30f), Ui.dp(context, 30f))
+                    background = Ui.roundedStroke(Color.WHITE, 0x66FFFFFF, 1f, Ui.RADIUS_PILL)
+                    isClickable = true
+                    setOnClickListener { onPickColor?.invoke() }
+                }
+                addView(colourDot)
+                addView(Ui.textButton(context, context.getString(R.string.pick), accent = false) { onPickColor?.invoke() })
             },
         )
-        addView(sizeSlider)
-        addView(hardnessSlider)
-        addView(flowSlider)
-        addView(toleranceSlider)
-        sizeSlider.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
-                sizeLabel.text = context.getString(R.string.size_value, progress + 2)
-            }
+    }
 
-            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
-            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
-        })
+    init {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(Ui.dp(context, 14f), Ui.dp(context, 10f), Ui.dp(context, 14f), Ui.dp(context, 10f))
+        addView(toolName.apply { setPadding(0, 0, Ui.dp(context, 14f), 0) })
+        for (row in listOf(sizeRow, hardnessRow, flowRow, toleranceRow)) {
+            addView(
+                row.apply {
+                    layoutParams = LayoutParams(Ui.dp(context, 152f), LayoutParams.WRAP_CONTENT).apply {
+                        marginEnd = Ui.dp(context, 16f)
+                    }
+                },
+            )
+        }
+        addView(colourRow)
     }
 
     fun bind(tool: EditorView.Tool, brushSize: Float, color: Int) {
         val painter = tool == EditorView.Tool.BRUSH || tool == EditorView.Tool.ERASER
-        sizeSlider.visibility = if (painter) VISIBLE else GONE
-        sizeLabel.visibility = if (painter) VISIBLE else GONE
-        hardnessSlider.visibility = if (painter) VISIBLE else GONE
-        flowSlider.visibility = if (painter) VISIBLE else GONE
-        toleranceSlider.visibility = if (tool == EditorView.Tool.FILL) VISIBLE else GONE
-        swatch.visibility = if (painter || tool == EditorView.Tool.FILL || tool == EditorView.Tool.TEXT) VISIBLE else GONE
-        sizeSlider.progress = (brushSize - 2f).toInt().coerceIn(0, 198)
-        sizeLabel.text = context.getString(R.string.size_value, brushSize.toInt())
-        swatch.background = Ui.roundedStroke(color, 0x66FFFFFF, 1f, Ui.dp(context, 8f).toFloat())
+        toolName.text = toolLabel(tool)
+        sizeRow.visibility = if (painter) VISIBLE else GONE
+        hardnessRow.visibility = if (painter) VISIBLE else GONE
+        flowRow.visibility = if (painter) VISIBLE else GONE
+        toleranceRow.visibility = if (tool == EditorView.Tool.FILL) VISIBLE else GONE
+        colourRow.visibility = if (painter || tool == EditorView.Tool.FILL || tool == EditorView.Tool.TEXT) VISIBLE else GONE
+        if (painter) sizeRow.set(brushSize.toInt().coerceIn(2, 200))
+        colourDot.background = Ui.roundedStroke(color, 0x66FFFFFF, 1f, Ui.RADIUS_PILL)
     }
 
-    fun currentColorSwatch(): Int = (swatch.background as? android.graphics.drawable.GradientDrawable)?.color?.defaultColor ?: Color.WHITE
-}
+    fun currentColorSwatch(): Int =
+        (colourDot.background as? android.graphics.drawable.GradientDrawable)?.color?.defaultColor ?: Color.WHITE
 
+    private fun toolLabel(tool: EditorView.Tool): String = context.getString(
+        when (tool) {
+            EditorView.Tool.MOVE -> R.string.tool_move
+            EditorView.Tool.BRUSH -> R.string.tool_brush
+            EditorView.Tool.ERASER -> R.string.tool_eraser
+            EditorView.Tool.FILL -> R.string.tool_fill
+            EditorView.Tool.EYEDROPPER -> R.string.tool_eyedropper
+            EditorView.Tool.TEXT -> R.string.tool_text
+            EditorView.Tool.CROP -> R.string.tool_crop
+        },
+    )
+}

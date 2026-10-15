@@ -33,65 +33,98 @@ object Dialogs {
         setPadding(Ui.dp(context, 20f), Ui.dp(context, 12f), Ui.dp(context, 20f), Ui.dp(context, 4f))
     }
 
-    /** New document: a few presets plus free width/height. */
+    /** A text field that looks like the rest of the app rather than like a system widget. */
+    private fun field(context: Context, initial: String, numeric: Boolean = true): EditText =
+        EditText(context).apply {
+            if (numeric) inputType = InputType.TYPE_CLASS_NUMBER
+            setText(initial)
+            setTextColor(Ui.TEXT)
+            setHintTextColor(Ui.TEXT_FAINT)
+            textSize = 16f
+            isSingleLine = true
+            gravity = Gravity.CENTER
+            setPadding(Ui.dp(context, 12f), Ui.dp(context, 10f), Ui.dp(context, 12f), Ui.dp(context, 10f))
+            background = Ui.roundedStroke(Ui.SURFACE_HIGH, Ui.OUTLINE, 1f, Ui.RADIUS_MD)
+        }
+
+    /** New document: presets, free size, and a live size/print estimate. */
     fun newDocument(context: Context, onOk: (width: Int, height: Int, background: Int) -> Unit): AlertDialog {
         val content = panel(context)
-        val width = EditText(context).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setText("1080")
-            setTextColor(Ui.TEXT)
+        var widthValue = 1080
+        var heightValue = 1080
+        var chosen = 0
+        val backgrounds = intArrayOf(0, Argb.pack(255, 255, 255, 255), Argb.pack(255, 0, 0, 0))
+        val backgroundNames = listOf(
+            context.getString(R.string.background_transparent),
+            context.getString(R.string.background_white),
+            context.getString(R.string.background_black),
+        )
+
+        val width = field(context, "1080")
+        val height = field(context, "1080")
+        val summary = Ui.label(context, "", 11.5f, Ui.TEXT_DIM)
+        fun refreshSummary() {
+            widthValue = width.text.toString().toIntOrNull()?.coerceIn(1, 30000) ?: widthValue
+            heightValue = height.text.toString().toIntOrNull()?.coerceIn(1, 30000) ?: heightValue
+            val megapixels = widthValue.toLong() * heightValue.toLong() / 1_000_000.0
+            val memory = widthValue.toLong() * heightValue.toLong() * 4L / (1024 * 1024)
+            summary.text = context.getString(R.string.new_summary, megapixels, memory)
         }
-        val height = EditText(context).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setText("1080")
-            setTextColor(Ui.TEXT)
+
+        val sizeRow = Ui.row(context, Ui.dp(context, 8f)).apply {
+            addView(width, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(Ui.label(context, "×", 16f, Ui.TEXT_DIM, medium = true), LinearLayout.LayoutParams(Ui.dp(context, 20f), LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(height, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
-        content.addView(Ui.label(context, context.getString(R.string.new_width), 12f, Ui.TEXT_DIM))
-        content.addView(width)
-        content.addView(Ui.label(context, context.getString(R.string.new_height), 12f, Ui.TEXT_DIM))
-        content.addView(height)
+        content.addView(Ui.sectionLabel(context, context.getString(R.string.new_size)))
+        content.addView(sizeRow)
+        content.addView(summary.apply { setPadding(0, Ui.dp(context, 6f), 0, Ui.dp(context, 4f)) })
 
         val presets = listOf(
-            "1080×1080" to (1080 to 1080),
-            "1920×1080" to (1920 to 1080),
-            "1080×1920" to (1080 to 1920),
-            "2480×3508 (A4)" to (2480 to 3508),
+            "1080 × 1080" to (1080 to 1080),
+            "1920 × 1080" to (1920 to 1080),
+            "1080 × 1920" to (1080 to 1920),
+            "2048 × 2048" to (2048 to 2048),
+            "A4 · 2480 × 3508" to (2480 to 3508),
         )
-        content.addView(Ui.label(context, context.getString(R.string.new_presets), 12f, Ui.TEXT_DIM))
+        content.addView(Ui.sectionLabel(context, context.getString(R.string.new_presets)))
+        val presetFlow = Ui.row(context, Ui.dp(context, 6f))
         for ((label, size) in presets) {
-            content.addView(
-                Ui.textButton(context, label) {
-                    width.setText(size.first.toString())
-                    height.setText(size.second.toString())
-                },
-            )
+            presetFlow.addView(Ui.chip(context, label, selected = size.first == widthValue && size.second == heightValue) {
+                width.setText(size.first.toString())
+                height.setText(size.second.toString())
+                refreshSummary()
+            })
         }
+        content.addView(
+            android.widget.HorizontalScrollView(context).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(presetFlow)
+            },
+        )
 
-        val backgrounds = intArrayOf(0, Argb.pack(255, 255, 255, 255), Argb.pack(255, 0, 0, 0))
-        var chosen = 0
-        val backgroundRow = Ui.row(context)
+        content.addView(Ui.sectionLabel(context, context.getString(R.string.new_background)).apply { setPadding(0, Ui.dp(context, 10f), 0, 0) })
+        val backgroundCaption = Ui.label(context, backgroundNames[0], 11f, Ui.TEXT_FAINT)
+        val backgroundRow = Ui.row(context, Ui.dp(context, 8f))
         val swatches = ArrayList<View>()
         for ((index, color) in backgrounds.withIndex()) {
             val swatch = View(context).apply {
-                layoutParams = LinearLayout.LayoutParams(0, Ui.dp(context, 40f), 1f)
+                layoutParams = LinearLayout.LayoutParams(0, Ui.dp(context, 44f), 1f)
                 background = Ui.roundedStroke(
                     color,
-                    if (index == chosen) Ui.ACCENT else 0x66FFFFFF,
+                    if (index == chosen) Ui.ACCENT else Ui.OUTLINE,
                     if (index == chosen) 3f else 1f,
-                    Ui.dp(context, 10f).toFloat(),
+                    Ui.RADIUS_MD,
                 )
                 setOnClickListener {
                     chosen = index
+                    backgroundCaption.text = backgroundNames[index]
                     for ((i, other) in swatches.withIndex()) {
                         other.background = Ui.roundedStroke(
                             backgrounds[i],
-                            if (i == chosen) Ui.ACCENT else 0x66FFFFFF,
+                            if (i == chosen) Ui.ACCENT else Ui.OUTLINE,
                             if (i == chosen) 3f else 1f,
-                            Ui.dp(context, 10f).toFloat(),
-                        )
-                        (other.background as android.graphics.drawable.GradientDrawable).setStroke(
-                            if (i == chosen) 3 else 1,
-                            if (i == chosen) Ui.ACCENT else 0x66FFFFFF,
+                            Ui.RADIUS_MD,
                         )
                     }
                 }
@@ -99,8 +132,12 @@ object Dialogs {
             swatches.add(swatch)
             backgroundRow.addView(swatch)
         }
-        content.addView(Ui.label(context, context.getString(R.string.new_background), 12f, Ui.TEXT_DIM))
         content.addView(backgroundRow)
+        content.addView(backgroundCaption.apply { setPadding(0, Ui.dp(context, 4f), 0, 0) })
+
+        width.addTextChangedListener(simpleWatcher { refreshSummary() })
+        height.addTextChangedListener(simpleWatcher { refreshSummary() })
+        refreshSummary()
 
         return AlertDialog.Builder(context)
             .setTitle(R.string.new_document)
@@ -114,7 +151,15 @@ object Dialogs {
             .create()
     }
 
-    /** Export: format, JPEG quality and a scale factor. */
+    /** Minimal TextWatcher so callers only have to say what changed. */
+    private fun simpleWatcher(onChange: () -> Unit): android.text.TextWatcher =
+        object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) = onChange()
+        }
+
+    /** Export: format, JPEG quality and an output scale. */
     fun export(
         context: Context,
         suggestedName: String,
@@ -124,16 +169,43 @@ object Dialogs {
         var format = ExportFormat.Psd
         var quality = 92
         var scale = 1f
+        lateinit var qualityLabel: TextView
 
-        val qualityLabel = Ui.label(context, context.getString(R.string.quality_value, quality), 12f, Ui.TEXT_DIM)
+        val qualityRow = Ui.column(context).apply {
+            addView(
+                Ui.row(context).apply {
+                    addView(Ui.sectionLabel(context, context.getString(R.string.quality)))
+                    addView(Ui.spacer(context))
+                    qualityLabel = Ui.label(context, context.getString(R.string.quality_value, quality), 12f, Ui.TEXT, mono = true)
+                    addView(qualityLabel)
+                },
+            )
+        }
         val qualitySlider = Ui.slider(context, 40, 100, quality) { value ->
             quality = value
             qualityLabel.text = context.getString(R.string.quality_value, value)
         }
-        val scaleLabel = Ui.label(context, context.getString(R.string.scale_value, 100), 12f, Ui.TEXT_DIM)
-        val scaleSlider = Ui.slider(context, 10, 100, 100) { value ->
-            scale = value / 100f
-            scaleLabel.text = context.getString(R.string.scale_value, value)
+        qualityRow.addView(qualitySlider, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(context, 36f)))
+
+        val scaleChips = Ui.row(context, Ui.dp(context, 6f))
+        val scaleOptions = listOf(100 to 1f, 50 to 0.5f, 25 to 0.25f)
+        val scaleChipViews = ArrayList<TextView>()
+        for ((percent, factor) in scaleOptions) {
+            val chip = Ui.chip(context, "$percent%", selected = percent == 100) {
+                scale = factor
+                for ((i, other) in scaleChipViews.withIndex()) {
+                    val active = scaleOptions[i].first == percent
+                    other.setTextColor(if (active) Ui.ON_ACCENT else Ui.TEXT_DIM)
+                    other.background = Ui.roundedStroke(
+                        if (active) Ui.ACCENT else Ui.SURFACE_MAX,
+                        Ui.OUTLINE,
+                        1f,
+                        Ui.RADIUS_PILL,
+                    )
+                }
+            }
+            scaleChipViews.add(chip)
+            scaleChips.addView(chip)
         }
 
         val formats = listOf(
@@ -141,42 +213,36 @@ object Dialogs {
             ExportFormat.Png to context.getString(R.string.format_png),
             ExportFormat.Jpeg to context.getString(R.string.format_jpeg),
         )
-        val formatRow = Ui.row(context)
+        val formatRow = Ui.row(context, Ui.dp(context, 6f))
         val formatButtons = ArrayList<TextView>()
-        for ((_, label) in formats) {
-            val button = Ui.label(context, label).apply {
-                setPadding(Ui.dp(context, 14f), Ui.dp(context, 10f), Ui.dp(context, 14f), Ui.dp(context, 10f))
-                background = Ui.rounded(Ui.SURFACE_HIGH, Ui.dp(context, 16f).toFloat())
-            }
-            formatButtons.add(button)
-            formatRow.addView(button)
-        }
+        for ((_, label) in formats) formatButtons.add(Ui.chip(context, label) { })
 
         fun select(value: ExportFormat) {
             format = value
             for ((i, button) in formatButtons.withIndex()) {
                 val active = formats[i].first == value
+                button.setTextColor(if (active) Ui.ON_ACCENT else Ui.TEXT_DIM)
                 button.background = Ui.roundedStroke(
-                    if (active) 0x33FFB74D else Ui.SURFACE_HIGH,
-                    if (active) Ui.ACCENT else 0x00000000,
-                    if (active) 2f else 1f,
-                    Ui.dp(context, 16f).toFloat(),
+                    if (active) Ui.ACCENT else Ui.SURFACE_MAX,
+                    Ui.OUTLINE,
+                    1f,
+                    Ui.RADIUS_PILL,
                 )
             }
-            qualitySlider.visibility = if (value == ExportFormat.Jpeg) View.VISIBLE else View.GONE
-            qualityLabel.visibility = qualitySlider.visibility
+            qualityRow.visibility = if (value == ExportFormat.Jpeg) View.VISIBLE else View.GONE
+            scaleChips.visibility = if (value == ExportFormat.Psd) View.GONE else View.VISIBLE
         }
         for ((index, entry) in formats.withIndex()) {
             formatButtons[index].setOnClickListener { select(entry.first) }
         }
         select(ExportFormat.Psd)
 
+        content.addView(Ui.sectionLabel(context, context.getString(R.string.export_format)))
         content.addView(formatRow)
-        content.addView(qualityLabel)
-        content.addView(qualitySlider)
-        content.addView(scaleLabel)
-        content.addView(scaleSlider)
-        content.addView(Ui.label(context, context.getString(R.string.export_hint, suggestedName), 11f, Ui.TEXT_DIM))
+        content.addView(Ui.sectionLabel(context, context.getString(R.string.export_scale)).apply { setPadding(0, Ui.dp(context, 12f), 0, 0) })
+        content.addView(scaleChips)
+        content.addView(qualityRow.apply { setPadding(0, Ui.dp(context, 4f), 0, 0) })
+        content.addView(Ui.label(context, context.getString(R.string.export_hint, suggestedName), 11f, Ui.TEXT_FAINT))
 
         return AlertDialog.Builder(context)
             .setTitle(R.string.export)

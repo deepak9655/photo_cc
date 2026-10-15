@@ -22,6 +22,7 @@ enum class Glyph {
     Brush, Eraser, Fill, EyeDropper, Move, Text, Crop, Layers, Group,
     Undo, Redo, Add, Trash, Duplicate, Merge, Flatten, Up, Down,
     Eye, EyeOff, Menu, Save, Open, Export, Info, Fit, Close, Check, Sliders, Image, New,
+    Remove,
 }
 
 class GlyphDrawable(
@@ -205,6 +206,8 @@ class GlyphDrawable(
                 line(12f, 5f, 12f, 19f)
                 line(5f, 12f, 19f, 12f)
             }
+
+            Glyph.Remove -> line(5f, 12f, 19f, 12f)
 
             Glyph.Trash -> {
                 line(5f, 7f, 19f, 7f)

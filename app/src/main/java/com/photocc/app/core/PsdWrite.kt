@@ -1,5 +1,7 @@
 package com.photocc.app.core
 
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -81,53 +83,121 @@ object PsdWrite {
         return out.toByteArray()
     }
 
-    /** Flattens the document and writes the merged image section. */
+    /**
+     * Flattens the document and writes the merged image section.
+     *
+     * Two strategies, chosen by size, because both matter on a phone:
+     *
+     *  * **normal documents** (≤ [SINGLE_PASS_PIXELS]) — one composite pass, with
+     *    per-channel row buffers. Fast, and a few tens of MB of scratch;
+     *  * **huge documents** — the image is streamed channel by channel straight
+     *    into the output, with the RLE row tables reserved up front and patched
+     *    afterwards. Slower (the document is composited once per channel) but the
+     *    memory it needs does not grow with the document at all, which is what
+     *    stops a 48 MPix poster from being an `OutOfMemoryError`.
+     *
+     * What is never allocated is a document-sized `IntArray` (240 MB for 60 MPix)
+     * or document-sized channel planes — the old code did both.
+     */
     fun writeMergedImage(doc: PsdDocument, out: Blob, options: Options) {
         if (!options.writeMerged) {
             out.short(0)
             return
         }
-        val region = Rect(0, 0, doc.width, doc.height)
-        val composite = IntArray(doc.width * doc.height)
-        Render.flatten(doc, region, composite, background = 0)
-
-        val count = doc.width * doc.height
-        val channels = arrayOfNulls<ByteArray>(4)
-        val red = ByteArray(count)
-        val green = ByteArray(count)
-        val blue = ByteArray(count)
-        val alpha = ByteArray(count)
-        for (i in 0 until count) {
-            val value = composite[i]
-            red[i] = Argb.r(value).toByte()
-            green[i] = Argb.g(value).toByte()
-            blue[i] = Argb.b(value).toByte()
-            alpha[i] = Argb.a(value).toByte()
-        }
-        channels[0] = red
-        channels[1] = green
-        channels[2] = blue
-        channels[3] = alpha
-
-        val compression = if (options.compression == 1) 1 else 0
-        out.short(compression)
-        if (compression == 0) {
-            for (channel in channels) if (channel != null) out.raw(channel)
+        val width = doc.width
+        val height = doc.height
+        val count = width * height
+        if (width <= 0 || height <= 0 || count <= 0) {
+            out.short(0)
             return
         }
-        // RLE: *all* row-length tables first, then the packed rows, for every channel.
-        val packed = ArrayList<ByteArray>(4)
-        val tables = ArrayList<ByteArray>(4)
-        for (channel in channels) {
-            if (channel == null) continue
-            val encoded = ChannelCodec.encodeRle(channel, doc.width, doc.height)
-            val tableLength = doc.height * 2
-            tables.add(encoded.copyOfRange(0, tableLength))
-            packed.add(encoded.copyOfRange(tableLength, encoded.size))
+        val compression = if (options.compression == 1) 1 else 0
+        out.short(compression)
+
+        val bandRows = max(1, min(height, MAX_MERGED_BAND_PIXELS / max(1, width)))
+        val band = IntArray(width * bandRows)
+        val line = ByteArray(width)
+
+        if (count <= SINGLE_PASS_PIXELS) {
+            if (compression == 0) {
+                val planes = Array(4) { ByteArray(count) }
+                var y = 0
+                while (y < height) {
+                    val rows = min(bandRows, height - y)
+                    Render.flattenBand(doc, y, rows, band, background = 0)
+                    for (channel in 0 until 4) {
+                        val plane = planes[channel]
+                        var index = y * width
+                        for (i in 0 until width * rows) plane[index++] = channelByte(band[i], channel)
+                    }
+                    y += rows
+                }
+                for (plane in planes) out.raw(plane)
+                return
+            }
+            val tables = Array(4) { ByteArray(height * 2) }
+            val rowsOut = Array(4) { Blob(1 shl 14) }
+            var y = 0
+            while (y < height) {
+                val rows = min(bandRows, height - y)
+                Render.flattenBand(doc, y, rows, band, background = 0)
+                for (channel in 0 until 4) {
+                    val sink = rowsOut[channel]
+                    val table = tables[channel]
+                    for (row in 0 until rows) {
+                        val base = row * width
+                        for (x in 0 until width) line[x] = channelByte(band[base + x], channel)
+                        val encoded = ChannelCodec.encodeRleRow(line)
+                        val at = (y + row) * 2
+                        table[at] = ((encoded.size ushr 8) and 0xFF).toByte()
+                        table[at + 1] = (encoded.size and 0xFF).toByte()
+                        sink.raw(encoded)
+                    }
+                }
+                y += rows
+            }
+            for (table in tables) out.raw(table)
+            for (rows in rowsOut) out.append(rows)
+            return
         }
-        for (table in tables) out.raw(table)
-        for (rows in packed) out.raw(rows)
+
+        // Huge document: stream one channel at a time, patching the tables at the end.
+        val tableBase = out.size
+        if (compression == 1) out.zeros(height * 2 * 4)
+        for (channel in 0 until 4) {
+            var y = 0
+            while (y < height) {
+                val rows = min(bandRows, height - y)
+                Render.flattenBand(doc, y, rows, band, background = 0)
+                for (row in 0 until rows) {
+                    val base = row * width
+                    for (x in 0 until width) line[x] = channelByte(band[base + x], channel)
+                    if (compression == 0) {
+                        out.raw(line)
+                    } else {
+                        val encoded = ChannelCodec.encodeRleRow(line)
+                        out.patchU16(tableBase + (channel * height + y + row) * 2, encoded.size)
+                        out.raw(encoded)
+                    }
+                }
+                y += rows
+            }
+        }
     }
+
+    private fun channelByte(value: Int, channel: Int): Byte = when (channel) {
+        0 -> Argb.r(value).toByte()
+        1 -> Argb.g(value).toByte()
+        2 -> Argb.b(value).toByte()
+        else -> Argb.a(value).toByte()
+    }
+
+    /** Pixels per band while writing the merged image. */
+    private const val MAX_MERGED_BAND_PIXELS = 2_000_000
+
+    /** Above this, the merged image is streamed channel by channel instead of buffered. */
+    private const val SINGLE_PASS_PIXELS = 6_000_000
+
 
     /* ------------------------------------------------------------------ record layout */
 

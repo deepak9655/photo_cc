@@ -46,6 +46,7 @@ object EngineSelfTest {
         sessionSection()
         roundTripSection()
         textSection()
+        memorySection()
         report()
     }
 
@@ -853,6 +854,81 @@ object EngineSelfTest {
     }
 
     /* ------------------------------------------------------------------ plumbing */
+
+    /* ------------------------------------------------- 7. the memory-budget paths */
+
+    /**
+     * The paths that used to be `OutOfMemoryError`s on a phone: opening a document
+     * bigger than the import budget, compositing it into a screen-sized buffer and
+     * writing the merged image back out. Each one is checked here at a size the
+     * test can afford, so a regression shows up as a failing check instead of a
+     * crash on someone's device.
+     */
+    private fun memorySection() {
+        section("Large documents and the memory budget")
+
+        val width = 2400
+        val height = 1800
+        val doc = PsdDocument(width, height)
+        val layer = RasterLayer(name = "Flat", x = 0, y = 0, pixels = Pixels(width, height, IntArray(width * height)))
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                // A smooth gradient with a hard band: downscaling must not turn the
+                // band into mush, and the gradient proves we sampled real pixels.
+                val band = if (y in height / 3 until height / 3 + 40) 0x40 else 0
+                layer.pixels!!.data[y * width + x] = Argb.pack(255, x * 255 / width, y * 255 / height, band)
+            }
+        }
+        doc.children.add(layer)
+        val bytes = PsdWrite.write(doc, PsdWrite.Options(compression = 1))
+        check("memory: wrote a ${width}×${height} fixture", bytes.size > 1000, "got ${bytes.size} bytes")
+
+        // Opening it with a deliberately tiny budget must sample it down instead of
+        // allocating the full-size planes.
+        val budget = 1_000_000
+        val read = PsdRead.read(bytes, "big.psd", maxPixels = budget)
+        val stride = read.importStride
+        check("memory: import sampled the file down", stride > 1, "stride $stride")
+        check("memory: source size remembered", read.sourceWidth == width && read.sourceHeight == height)
+        check(
+            "memory: sampled size is inside the budget",
+            read.width.toLong() * read.height.toLong() <= budget,
+            "${read.width}×${read.height} for a $budget pixel budget",
+        )
+        val sampled = read.children.firstOrNull() as? RasterLayer
+        check("memory: the layer came along", sampled?.pixels != null)
+        check(
+            "memory: layer geometry was scaled too",
+            sampled != null && sampled.pixels!!.width == read.width && sampled.pixels!!.height == read.height,
+            "layer ${sampled?.pixels?.width}×${sampled?.pixels?.height} vs document ${read.width}×${read.height}",
+        )
+
+        // The composite a phone actually draws: the whole document, screen-sized.
+        val outW = 540
+        val outH = 405
+        val screen = IntArray(outW * outH)
+        val started = System.currentTimeMillis()
+        Render.flattenScaled(read, Rect(0, 0, read.width, read.height), screen, outW, outH, Argb.OPAQUE_WHITE)
+        val elapsed = System.currentTimeMillis() - started
+        check("memory: screen-sized composite finished", elapsed < 4000, "${elapsed} ms")
+        check("memory: composite is opaque everywhere", screen.all { Argb.a(it) == 255 })
+        check("memory: composite kept the gradient", screen[outW * 20 + outW / 2] != screen[outW * 380 + outW / 2])
+
+        // Scale-1 flattenScaled must agree with the plain flatten pixel for pixel.
+        val reference = IntArray(600 * 450)
+        Render.flatten(read, Rect(0, 0, 600, 450), reference)
+        val same = IntArray(600 * 450)
+        Render.flattenScaled(read, Rect(0, 0, 600, 450), same, 600, 450)
+        var differences = 0
+        for (i in reference.indices) if (reference[i] != same[i]) differences++
+        check("memory: scale-1 composite is identical to flatten", differences == 0, "$differences differing pixels")
+
+        // Writing the merged image back out must not allocate document-sized planes.
+        val rewritten = PsdWrite.write(read, PsdWrite.Options(compression = 1))
+        check("memory: re-wrote the sampled document", rewritten.size > 1000, "got ${rewritten.size} bytes")
+        val reread = PsdRead.read(rewritten, "big-again.psd", maxPixels = budget)
+        check("memory: round trip kept the layer count", reread.children.size == read.children.size)
+    }
 
     private fun section(title: String) = println("\n== $title ==")
 

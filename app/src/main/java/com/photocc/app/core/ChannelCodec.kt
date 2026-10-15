@@ -121,6 +121,10 @@ object ChannelCodec {
         return out.toByteArray()
     }
 
+    /** PackBits for one row, with no length prefix (used to stream the merged image). */
+    fun encodeRleRow(row: ByteArray, start: Int = 0, length: Int = row.size - start): ByteArray =
+        packRow(row, start, length)
+
     private fun packRow(source: ByteArray, start: Int, width: Int): ByteArray {
         val out = ByteArrayOutputStream(width + 8)
         var i = 0

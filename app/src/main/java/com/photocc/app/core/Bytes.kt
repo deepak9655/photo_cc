@@ -59,7 +59,14 @@ class Cursor(val data: ByteArray, var pos: Int = 0) {
 
 /** Growable big-endian writer with back-patching, used to build PSD files. */
 class Blob(initial: Int = 8192) {
-    private val out = ByteArrayOutputStream(initial)
+    /** Like [ByteArrayOutputStream], but existing bytes can be back-patched in O(1). */
+    private class Patchable(initial: Int) : ByteArrayOutputStream(initial) {
+        fun poke(offset: Int, value: Int) {
+            if (offset in 0 until count) buf[offset] = value.toByte()
+        }
+    }
+
+    private val out = Patchable(initial)
 
     val size: Int get() = out.size()
 
@@ -103,6 +110,16 @@ class Blob(initial: Int = 8192) {
     }
 
     /** Writes a placeholder that [patchInt] fills in once the length is known. */
+    /**
+     * Writes a big-endian uint16 into already-written bytes (used for RLE row tables).
+     * O(1): the old version copied the whole buffer per row, which on a 48 MPix
+     * document meant tens of gigabytes of copying.
+     */
+    fun patchU16(offset: Int, value: Int) {
+        out.poke(offset, (value ushr 8) and 0xFF)
+        out.poke(offset + 1, value and 0xFF)
+    }
+
     fun reserveInt(): Int {
         val at = out.size()
         int(0)
@@ -110,12 +127,10 @@ class Blob(initial: Int = 8192) {
     }
 
     fun patchInt(offset: Int, value: Int) {
-        val bytes = out.toByteArray()
-        bytes[offset] = (value ushr 24).toByte()
-        bytes[offset + 1] = (value ushr 16).toByte()
-        bytes[offset + 2] = (value ushr 8).toByte()
-        bytes[offset + 3] = value.toByte()
-        reset(bytes)
+        out.poke(offset, (value ushr 24) and 0xFF)
+        out.poke(offset + 1, (value ushr 16) and 0xFF)
+        out.poke(offset + 2, (value ushr 8) and 0xFF)
+        out.poke(offset + 3, value and 0xFF)
     }
 
     /** Writes everything from `offset` in `blob` (used to stitch sections). */
