@@ -79,6 +79,13 @@ object Colors {
         return pack(a, r, g, b)
     }
 
+    /** Hue 0..360, saturation 0..1, value 0..1, as a fresh triple. */
+    fun toHsv(color: Int): FloatArray {
+        val out = FloatArray(3)
+        toHsv(color, out)
+        return out
+    }
+
     /** Hue 0..360, saturation 0..1, value 0..1. */
     fun toHsv(color: Int, out: FloatArray) {
         val r = red(color) / 255f

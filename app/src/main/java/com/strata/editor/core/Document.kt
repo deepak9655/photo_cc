@@ -44,6 +44,7 @@ class Layer(
      * Size of a solid or adjustment layer's area. Adjustments default to the whole
      * document (set when the layer is created), solids to whatever the user drew.
      */
+    /** Size of a solid or adjustment layer's area; adjustments default to the whole document. */
     var contentWidth: Int = 0
     var contentHeight: Int = 0
 
@@ -181,7 +182,14 @@ enum class TextAlign { LEFT, CENTER, RIGHT }
 /**
  * A document: a canvas plus a stack of layers, bottom-first in [layers].
  */
-class Document(val width: Int, val height: Int) {
+/**
+ * A document: canvas size, the layer tree, the selection and the undo stack.
+ *
+ * The canvas size is a `var` because "Canvas size", "Image size", "Crop" and the
+ * rotate commands all rebuild it; every operation that does so reads the current
+ * value rather than a cached copy.
+ */
+class Document(var width: Int, var height: Int) {
 
     val layers: MutableList<Layer> = mutableListOf()
 

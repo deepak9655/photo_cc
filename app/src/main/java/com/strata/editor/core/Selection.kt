@@ -129,6 +129,42 @@ class Selection(val width: Int, val height: Int) {
     }
 
     /** Grows (+) or shrinks (−) the selection by a few pixels. */
+    /**
+     * The selection outline as horizontal runs: `[x, y, length]` triples where the
+     * coverage changes. The view draws these as marching ants — a run-length walk
+     * costs one pass over the mask, and the result is cached until the selection
+     * changes, so a full-screen selection is still cheap to draw every frame.
+     */
+    fun outlinePoints(): IntArray {
+        if (isEmpty) return IntArray(0)
+        val runs = ArrayList<Int>(256)
+        for (y in 0 until height) {
+            val row = y * width
+            var x = 0
+            while (x < width) {
+                if (coverage[row + x].toInt() == 0) {
+                    x++
+                    continue
+                }
+                val start = x
+                while (x < width && coverage[row + x].toInt() != 0) x++
+                val above = if (y == 0) false else rowHasEdge(row - width, start, x)
+                val below = if (y == height - 1) false else rowHasEdge(row + width, start, x)
+                if (above || below) {
+                    runs.add(start)
+                    runs.add(y)
+                    runs.add(x - start)
+                }
+            }
+        }
+        return runs.toIntArray()
+    }
+
+    private fun rowHasEdge(rowStart: Int, from: Int, to: Int): Boolean {
+        for (i in from until to) if (coverage[rowStart + i].toInt() == 0) return true
+        return false
+    }
+
     fun grow(amount: Int) {
         if (amount == 0) return
         val temp = ByteArray(coverage.size)

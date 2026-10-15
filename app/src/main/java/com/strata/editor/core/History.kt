@@ -90,6 +90,13 @@ class History(private val budgetBytes: Int = 192 * 1024 * 1024) {
         builder.finish()?.let { push(it) }
     }
 
+    /**
+     * Throws an unfinished edit away and puts the tiles back the way they were.
+     * A stroke that is interrupted — a second finger arriving, the app going to
+     * the background — should leave no trace and no history step.
+     */
+    fun rollback(builder: PixelBuilder) = builder.restoreBefore()
+
     /* ------------------------------------------------------------- pixel edits */
 
     /**
@@ -119,6 +126,22 @@ class History(private val budgetBytes: Int = 192 * 1024 * 1024) {
                     if (!before.containsKey(key)) {
                         before[key] = copyTile(pixels, tx * tileSize, ty * tileSize)
                     }
+                }
+            }
+        }
+
+        /** Puts the tiles back the way they were, for an abandoned stroke. */
+        internal fun restoreBefore() {
+            val pixels = layer.pixels ?: return
+            for ((key, data) in before) {
+                if (data.isEmpty()) continue
+                val x0 = tileX(key) * tileSize
+                val y0 = tileY(key) * tileSize
+                val w = minOf(tileSize, pixels.width - x0)
+                val h = minOf(tileSize, pixels.height - y0)
+                if (w <= 0 || h <= 0) continue
+                for (y in 0 until h) {
+                    System.arraycopy(data, y * w, pixels.pixels, (y0 + y) * pixels.width + x0, w)
                 }
             }
         }
