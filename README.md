@@ -44,6 +44,7 @@ it cannot draw, it preserves.
 | Move | Drag a layer with one finger; two fingers always pan/zoom; double-tap to fit |
 | Save | Layered PSD with a merged preview, text layers left editable, plus flattened PNG / JPEG export at any scale |
 | History | Byte-budgeted undo/redo: pixel edits store only the 128 px cells they touched, structural edits clone the tree but share pixel buffers |
+| Big files | Documents over a 24 MPix import budget open **sampled down** (1/2, 1/3, 1/4) instead of failing; the UI says so, and the merge/save paths stream in bands |
 
 Anything the engine does not model — adjustment layers, layer styles, vector
 paths, smart objects, colour profiles, metadata, thumbnails — is **kept in the
@@ -55,8 +56,37 @@ create will not silently destroy it.
 The phone is held in one hand, so:
 
 - **one finger** does whatever the active tool does; **two fingers** always pan and zoom — no modal hand tool, no accidental strokes while pinching;
-- the tool row and the layer stack live at the **bottom edge**, inside thumb reach; the layer sheet slides up over the canvas;
-- every control is at least 44 dp tall, and the app is built with framework widgets only (no Compose, no AndroidX), so it starts in tens of milliseconds and looks native on every OEM skin.
+- the tool dock and the layer sheet live at the **bottom edge**, inside thumb reach; the layer sheet slides up over the canvas;
+- the document identity (name, size, and a warning when the file had to be sampled down) sits in a floating pill at the top, with undo/redo; zoom in / fit / zoom out float on the right edge;
+- the options strip above the dock only shows the controls the active tool actually uses;
+- every control is at least 48 dp tall, and the app is built with framework widgets only (no Compose, no AndroidX), so it starts in tens of milliseconds and looks native on every OEM skin.
+
+![The LayerPad interface](docs/ui-redesign.png)
+
+The picture is rendered from the same measurements the app uses — see
+`docs/render-ui-preview.py`, which is how the design can be reviewed without
+building the APK.
+
+## Not dying on a phone
+
+The first versions of the app died on real files: a 12 MPix document meant a
+48 MB `IntArray` plus a 48 MB bitmap on **every redraw**, a 50 MPix camera JPEG
+was decoded at full size, and saving allocated four document-sized channel planes.
+All three are fixed by never holding a document-sized buffer:
+
+- the canvas composites the document **band by band straight into a screen-sized
+  buffer** (`Render.flattenScaled`), with a 96 MB cap, a half-resolution retry and
+  a message rather than a crash;
+- PSD import has a **24 MPix budget** and samples larger files down, scaling layer,
+  mask and text geometry with them;
+- the merged image written on save is band-wise, and documents past 6 MPix are
+  streamed **channel by channel** into the output; the RLE row tables are
+  back-patched in place instead of copying the buffer per row;
+- export composites into an export-sized bitmap, never a document-sized one.
+
+`tools/engine-test.sh` checks all of it on a desktop JVM, including a
+"large documents and the memory budget" section, so a regression fails the build
+instead of someone's phone.
 
 ## Architecture
 
