@@ -396,6 +396,16 @@ object PsdFile {
         if (length < 2 || width <= 0 || height <= 0) return null
         val cursor = Cursor(data, offset)
         val compression = cursor.u16()
+        // A channel whose declared size cannot possibly hold what the record claims
+        // is a placeholder (an empty layer) or a broken record. Reading it anyway
+        // would pull neighbouring bytes in as pixels.
+        val bytesPerSample = (depth / 8).coerceAtLeast(1)
+        val minimum = when (compression) {
+            0 -> 2L + width.toLong() * height * bytesPerSample
+            1 -> 2L + 2L * height
+            else -> 3L
+        }
+        if (length < minimum) return null
         val consumed = decodeRows(data, cursor.position, width, height, stride, depth, compression, length - 2)
         return consumed?.first
     }
@@ -421,9 +431,10 @@ object PsdFile {
         when (compression) {
             0 -> {
                 val rowBytes = width * bytesPerSample
+                val end = minOf(data.size, offset + available.coerceAtLeast(0))
                 var position = offset
                 for (y in 0 until height) {
-                    if (position + rowBytes > data.size) break
+                    if (position + rowBytes > end) break
                     if (y % stride == 0) {
                         for (x in 0 until width step stride) {
                             val index = position + x * bytesPerSample
@@ -436,8 +447,9 @@ object PsdFile {
                 return out to rowBytes * height
             }
             1 -> {
+                val end = minOf(data.size, offset + available.coerceAtLeast(0))
                 var tablePosition = offset
-                if (tablePosition + height * 2 > data.size) return null
+                if (tablePosition + height * 2 > end) return null
                 val counts = IntArray(height)
                 var total = height * 2
                 for (y in 0 until height) {
@@ -448,7 +460,7 @@ object PsdFile {
                 var position = tablePosition
                 val row = IntArray(width)
                 for (y in 0 until height) {
-                    val rowEnd = minOf(position + counts[y], data.size)
+                    val rowEnd = minOf(position + counts[y], end)
                     if (y % stride == 0) {
                         java.util.Arrays.fill(row, 0)
                         var x = 0

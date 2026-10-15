@@ -208,7 +208,14 @@ object Compositor {
     /** Draws one layer: content, then mask, then blend into the accumulation buffer. */
     private fun paintLayer(layer: Layer, dst: Pixmap, region: Rect, docOffsetX: Int, docOffsetY: Int) {
         val pixmap = layer.pixels
-        val source = pixmap ?: LayerRenderer.render(layer, region, dst) ?: return
+        if (pixmap == null) {
+            // Solid colour and text come back already covering `region`, in document
+            // coordinates — they are blended straight in, with no layer offset.
+            val buffer = LayerRenderer.render(layer, region, dst) ?: return
+            blendOverRegion(buffer, dst, region, docOffsetX, docOffsetY, layer)
+            return
+        }
+        val source = pixmap
 
         val alphaScale = (layer.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
         val matrix = layer.transform
@@ -219,7 +226,7 @@ object Compositor {
         if (matrix == null) {
             val target = Rect(layerX, layerY, source.width, source.height).intersect(region)
             if (target.isEmpty) return
-            if (layer.blend == BlendMode.NORMAL && layer.mask == null && alphaScale == 255 && source === pixmap) {
+            if (layer.blend == BlendMode.NORMAL && layer.mask == null && alphaScale == 255) {
                 copyOpaque(source, dst, target, layerX, layerY, docOffsetX, docOffsetY)
                 return
             }
@@ -267,6 +274,47 @@ object Compositor {
                 val index = dstRow + (x - docOffsetX)
                 if (index in dst.pixels.indices) {
                     dst.pixels[index] = if (layer.blend == BlendMode.NORMAL) Colors.over(dst.pixels[index], src) else Blend.apply(layer.blend, dst.pixels[index], src)
+                }
+            }
+        }
+    }
+
+    /**
+     * Blends a region-sized buffer from [LayerRenderer] (a solid fill or rasterised
+     * text) into the destination, honouring the layer's mask, opacity and mode.
+     */
+    private fun blendOverRegion(
+        source: Pixmap,
+        dst: Pixmap,
+        region: Rect,
+        docOffsetX: Int,
+        docOffsetY: Int,
+        layer: Layer,
+    ) {
+        val alphaScale = (layer.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+        if (alphaScale == 0) return
+        val mask = layer.mask
+        val maskWidth = mask?.width ?: 0
+        val maskHeight = mask?.height ?: 0
+        val normal = layer.blend == BlendMode.NORMAL
+        for (y in 0 until source.height) {
+            val docY = region.y + y
+            val dstRow = (docY - docOffsetY) * dst.width - docOffsetX
+            val srcRow = y * source.width
+            for (x in 0 until source.width) {
+                var src = source.pixels[srcRow + x]
+                if (src == 0) continue
+                if (mask != null) {
+                    val mx = region.x + x - layer.x
+                    val my = docY - layer.y
+                    val m = if (mx in 0 until maskWidth && my in 0 until maskHeight) mask.pixels[my * maskWidth + mx] else 0
+                    if (m == 0) continue
+                    src = Colors.withAlpha(src, Colors.alpha(src) * Colors.luminance(m) / 255)
+                }
+                src = Colors.scaleAlpha(src, alphaScale)
+                val index = dstRow + region.x + x
+                if (index in dst.pixels.indices) {
+                    dst.pixels[index] = if (normal) Colors.over(dst.pixels[index], src) else Blend.apply(layer.blend, dst.pixels[index], src)
                 }
             }
         }

@@ -9,9 +9,16 @@ package com.strata.editor.core
  * out on the phone and one laid out in the tests agree about its size.
  */
 interface TextRasterizer {
-    /** Renders the text so its top-left corner is at the region's origin. */
-    fun rasterize(content: TextContent, region: Rect): Pixmap?
+    /**
+     * Renders `content`, positioned at `layout`, clipped to `region` — both in
+     * document coordinates. The returned pixmap covers `region` exactly, so the
+     * compositor can blend it straight in.
+     */
+    fun rasterize(content: TextContent, layout: Rect, region: Rect): Pixmap?
 
     /** The size the text occupies, in document pixels. */
     fun measure(content: TextContent): Rect
+
+    /** Font families this device can actually draw. */
+    fun families(): List<String> = emptyList()
 }

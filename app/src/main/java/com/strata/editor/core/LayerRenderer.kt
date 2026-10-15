@@ -37,7 +37,9 @@ object LayerRenderer {
         }
 
         layer.text?.let { text ->
-            return textRasterizer?.rasterize(text, region)
+            val rasterizer = textRasterizer ?: return null
+            val layout = layoutBounds(layer)
+            return rasterizer.rasterize(text, layout, region)
         }
 
         return null
@@ -45,4 +47,19 @@ object LayerRenderer {
 
     /** The rectangle a non-raster layer occupies in document space. */
     fun areaBounds(layer: Layer): Rect? = layer.areaBounds()
+
+    /**
+     * Where a text layer sits. The layer keeps its own layout rectangle; when a
+     * file did not carry one, the text is placed at the layer's position and a
+     * sensible box is derived from what it measures.
+     */
+    fun layoutBounds(layer: Layer): Rect {
+        val layout = layer.textLayout
+        if (!layout.isEmpty) return layout
+        val text = layer.text
+        val measured = if (text != null) textRasterizer?.measure(text) else null
+        val width = measured?.w?.takeIf { it > 0 } ?: maxOf(1, layer.contentWidth)
+        val height = measured?.h?.takeIf { it > 0 } ?: maxOf(1, layer.contentHeight)
+        return Rect(layer.x, layer.y, width, height)
+    }
 }

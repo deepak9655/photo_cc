@@ -92,6 +92,7 @@ class Layer(
      * covers, or the rectangle a solid fills.
      */
     fun areaBounds(): Rect? = when {
+        text != null -> textLayout.takeIf { !it.isEmpty } ?: Rect(x, y, maxOf(1, contentWidth), maxOf(1, contentHeight))
         solidColor != null -> Rect(x, y, maxOf(1, contentWidth), maxOf(1, contentHeight))
         adjustment != null -> Rect(x, y, maxOf(1, contentWidth), maxOf(1, contentHeight))
         else -> null

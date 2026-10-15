@@ -25,6 +25,7 @@ object PsdTest {
     @JvmStatic
     fun main(args: Array<String>) {
         println("PSD container")
+        AwtTextRasterizer.install()
         roundTripLayered()
         roundTripFlat()
         textBlocks()

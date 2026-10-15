@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Strata</string>
+
+    <!-- Shown by the system file picker, and by anything that hands the app a file. -->
+    <string name="open_psd">Open an image or a layered file</string>
+    <string name="save_psd">Save as PSD</string>
+    <string name="export_image">Export</string>
+</resources>
