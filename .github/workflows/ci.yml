@@ -4,9 +4,104 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  check:
+  # The engine is plain Kotlin with no Android dependencies, so it runs as a
+  # normal JVM program: real Photoshop files in, byte-level checks out.
+  engine:
+    name: Engine tests (JVM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      # Real Photoshop files (third-party sample corpus, not stored in the repo)
+      # plus the reference values the Kotlin reader is compared against.
+      - name: Fetch PSD fixtures and reference values
+        run: |
+          node tools/engine/fetch-fixtures.mjs
+          cd tools/engine
+          npm install --no-audit --no-fund
+          node compare-read.mjs
+
+      - name: Self-test the PSD engine on the JVM
+        run: gradle engineTest --no-daemon
+
+      - name: Upload test artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-test-artifacts
+          path: build/engine-test/
+          if-no-files-found: ignore
+
+      - name: Verify the written files with an independent reader (ag-psd)
+        run: cd tools/engine && node verify-write.mjs
+
+  apk:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug APK (side-loadable as-is)
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Sign release APK when a keystore is configured
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PHOTO_CC_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.PHOTO_CC_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.PHOTO_CC_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.PHOTO_CC_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export PHOTO_CC_KEYSTORE="$RUNNER_TEMP/release.keystore"
+            export PHOTO_CC_STORE_PASSWORD="$STORE_PASSWORD"
+            export PHOTO_CC_KEY_ALIAS="${KEY_ALIAS:-photocc}"
+            export PHOTO_CC_KEY_PASSWORD="$KEY_PASSWORD"
+            gradle :app:assembleRelease --no-daemon
+            echo "release APK built and signed"
+          else
+            echo "No keystore secret configured: building an unsigned release APK"
+            gradle :app:assembleRelease --no-daemon
+          fi
+
+      - name: Collect APKs
+        run: |
+          mkdir -p apk
+          find app/build/outputs/apk -name '*.apk' -exec cp {} apk/ \;
+          ls -lh apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photocc-apk
+          path: apk/*.apk
+
+  web:
+    name: Web companion
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,17 +109,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Type check
-        run: npm run typecheck
-      - name: PSD round-trip + UI smoke tests
-        run: npm run check
+          cache-dependency-path: web/package-lock.json
+      - name: Round-trip + UI smoke tests
+        working-directory: web
+        run: |
+          npm ci
+          npm run check
       - name: Production build
+        working-directory: web
         run: npx vite build
-      - name: Upload rendered previews
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rendered-previews
-          path: tools/out/*.png
-          if-no-files-found: ignore

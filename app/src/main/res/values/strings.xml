@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LayerPad</string>
+
+    <!-- canvas / status -->
+    <string name="no_document">No document</string>
+    <string name="working">Working…</string>
+    <string name="empty_title">LayerPad</string>
+    <string name="empty_hint">Open a PSD from your phone, or start a new one. Everything stays on the device — the app has no internet permission.</string>
+    <string name="opened">Opened %1$s · %2$d layers</string>
+    <string name="opened_partial">Opened %1$s · %2$d layer(s) cannot be drawn exactly here, but are kept untouched in the file</string>
+    <string name="saved">Saved %1$d KB</string>
+    <string name="picked_colour">Picked %1$s</string>
+    <string name="need_raster_layer">Select a pixel layer first</string>
+    <string name="layer_locked">That layer is locked</string>
+    <string name="background_layer">Background</string>
+    <string name="default_text">Text</string>
+
+    <!-- tools -->
+    <string name="size_value">%1$d px</string>
+    <string name="opacity_value">Opacity %1$d%%</string>
+    <string name="blend_mode">Blend mode</string>
+    <string name="colour">Colour</string>
+    <string name="apply">Apply</string>
+    <string name="create">Create</string>
+    <string name="swatch_reset">White</string>
+    <string name="text_colour">Text colour</string>
+    <string name="bold">Bold</string>
+    <string name="italic">Italic</string>
+
+    <!-- documents -->
+    <string name="open_psd">Open PSD</string>
+    <string name="import_image">Import image</string>
+    <string name="new_document">New document</string>
+    <string name="new_width">Width (px)</string>
+    <string name="new_height">Height (px)</string>
+    <string name="new_presets">Presets</string>
+    <string name="new_background">Background</string>
+    <string name="save_psd">Save PSD</string>
+    <string name="export">Export</string>
+    <string name="format_psd">PSD (editable)</string>
+    <string name="format_png">PNG (transparent)</string>
+    <string name="format_jpeg">JPEG (photo)</string>
+    <string name="quality_value">Quality %1$d</string>
+    <string name="scale_value">Scale %1$d%%</string>
+    <string name="export_hint">Suggested file name: %1$s</string>
+    <string name="fit_screen">Fit to screen</string>
+    <string name="zoom_100">Zoom 100%%</string>
+    <string name="document_info">Document info</string>
+    <string name="info_engine">Zoom %1$d%%</string>
+    <string name="info_buffer">Canvas buffer %1$d KB</string>
+
+    <!-- layers -->
+    <string name="layers">Layers</string>
+    <string name="rename">Rename</string>
+    <string name="select_next">Next layer</string>
+    <string name="delete_layer">Delete layer</string>
+    <string name="delete">Delete</string>
+    <string name="delete_confirm">Delete “%1$s”? This can be undone.</string>
+    <string name="flatten">Flatten image</string>
+    <string name="flatten_confirm">Merge every layer into one? Layer styles and text editability are lost. This can be undone.</string>
+    <string name="layer_type_text">Text</string>
+    <string name="layer_type_group">Group</string>
+    <string name="layer_type_empty">Empty</string>
+
+    <!-- text layers -->
+    <string name="new_text_layer">New text layer</string>
+    <string name="edit_text_layer">Edit text layer</string>
+
+    <!-- errors -->
+    <string name="error_open">Could not open the file</string>
+    <string name="error_save">Could not save the file</string>
+    <string name="error_export">Could not create the image</string>
+    <string name="error_unreadable">The file could not be read</string>
+    <string name="error_unwritable">The destination could not be written</string>
+    <string name="unsaved_title">Unsaved changes</string>
+    <string name="unsaved_message">This document has changes that were not saved.</string>
+    <string name="discard">Discard</string>
+</resources>

@@ -1,16 +1,27 @@
-# dependencies
-node_modules/
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+*.keystore
+!gradle/keystore.properties
 
-# build output
-dist/
-tools/.build/
-tools/out/
+# engine verification (fixtures are third-party sample files, fetched on demand)
+tools/engine/node_modules/
+tools/engine/fixtures/
+tools/engine/out/
+build/engine-test/
 
-# generated sample documents (npm run samples)
-samples/
+# web (optional companion app, see web/)
+web/node_modules/
+web/dist/
+web/tools/.build/
+web/tools/out/
+web/samples/
 
 # editor / OS noise
 .DS_Store
 *.log
-.vscode/
 .idea/
+.vscode/
