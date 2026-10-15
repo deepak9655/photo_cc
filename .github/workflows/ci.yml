@@ -34,7 +34,7 @@ jobs:
         run: |
           node tools/engine/fetch-fixtures.mjs
           cd tools/engine
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           node compare-read.mjs
 
       - name: Self-test the PSD engine on the JVM

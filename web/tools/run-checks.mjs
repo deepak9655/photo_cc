@@ -10,6 +10,14 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const run = (script) => execFileSync(process.execPath, [resolve(root, 'tools', script)], { stdio: 'inherit', cwd: root });
 
+// The checks import the bundle built from src/, so build it first: a fresh
+// checkout (CI, a new contributor) has no .build/ directory yet.
+if (!existsSync(resolve(root, 'tools/.build/core.mjs')) || !existsSync(resolve(root, 'tools/.build/ui.mjs'))) {
+  console.log('building the test bundles from src/…');
+  run('build-core.mjs');
+  run('build-ui.mjs');
+}
+
 if (!existsSync(resolve(root, 'samples/poster.psd')) || !existsSync(resolve(root, 'samples/flat.psd'))) {
   console.log('generating sample documents…');
   run('make-samples.mjs');
