@@ -9,12 +9,16 @@ file picker, so it cannot reach the network or your photo library on its own.
 There is no cloud, no telemetry, no analytics and no AI feature to disable.
 
 ```
-gradle :app:assembleDebug        # build a side-loadable APK
-gradle :app:assembleRelease      # 50 KB-ish, R8-shrunk, needs the signing env vars
-tools/engine-test.sh             # run the whole engine test suite on a desktop JVM
+gradle :app:assembleDebug        # side-loadable debug APK
+gradle :app:assembleRelease      # R8-shrunk release APK, signed when the env vars are set
+tools/engine-test.sh             # whole engine test suite, on a desktop JVM
 ```
 
-The APK is also built by CI on every push (see *Building & testing* below).
+You do not need Android Studio, and you do not need to build it yourself: every
+push builds both APKs in CI — open the latest run of the **Android APK** job and
+download the `photocc-apk` artifact, then install it on the phone (the debug APK
+installs as-is; the release APK needs the four signing environment variables
+below, or CI leaves it unsigned).
 
 ---
 
@@ -100,6 +104,7 @@ tools/engine-test.sh             # self-test + independent verification (needs N
    re-render the text.
 
 Latest run: **122 engine checks + 38 independent writer checks, all passing.**
+CI is green on all three jobs (engine tests, Android APK, web companion).
 
 CI (`.github/workflows/ci.yml`) does the same on every push, builds the debug
 APK, signs a release APK when keystore secrets are configured
