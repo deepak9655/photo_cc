@@ -8,6 +8,7 @@ local.properties
 !gradle/keystore.properties
 
 # engine verification (fixtures are third-party sample files, fetched on demand)
+.kotlin/
 tools/engine/node_modules/
 tools/engine/fixtures/
 tools/engine/out/

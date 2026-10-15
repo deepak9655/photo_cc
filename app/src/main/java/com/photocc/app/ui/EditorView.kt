@@ -128,9 +128,12 @@ class EditorView(context: Context) : View(context) {
     private var cropRect: Rect? = null
     private var gestureStartZoom = 1f
     private var gestureStartDistance = 0f
-    private var gestureStartPanX = 0f
-    private var gestureStartPanY = 0f
+    /** The document point that was under the fingers when the pinch started. */
+    private var gestureDocX = 0f
+    private var gestureDocY = 0f
     private var twoFinger = false
+    /** The composited region must stay inside this many pixels (~64 MB of ARGB). */
+    private val maxBufferPixels = 16_000_000L
 
     /* ------------------------------------------------------------- rendering */
 
@@ -158,11 +161,24 @@ class EditorView(context: Context) : View(context) {
         return Rect(x, y, width, height)
     }
 
+    /**
+     * The smallest zoom whose visible region still fits in one buffer. Zooming
+     * further out would mean compositing a document-sized image on a phone, so
+     * the canvas stops there instead (the info sheet says so).
+     */
+    private fun minimumZoom(): Float {
+        val screenPixels = (width.toLong() * height.toLong()).coerceAtLeast(1L)
+        val scale = kotlin.math.sqrt(screenPixels.toDouble() / maxBufferPixels.toDouble()).toFloat()
+        return scale.coerceIn(0.02f, 1f)
+    }
+
+    private fun maximumZoom(): Float = 8f
+
     fun fitToScreen() {
         val doc = session?.doc ?: return
         if (width == 0 || height == 0 || doc.width == 0 || doc.height == 0) return
         val scale = min(width.toFloat() / doc.width, height.toFloat() / doc.height)
-        zoom = if (scale > 0f) scale else 1f
+        zoom = (if (scale > 0f) scale else 1f).coerceIn(minimumZoom(), maximumZoom())
         centerOn(doc.width / 2f, doc.height / 2f)
         invalidateContent()
     }
@@ -277,100 +293,146 @@ class EditorView(context: Context) : View(context) {
         val session = session ?: return false
         val doc = session.doc
 
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            val now = SystemClock.uptimeMillis()
-            if (now - lastTapTime < 300 && hypot(event.x - lastTapX, event.y - lastTapY) < 60f) {
-                lastTapTime = 0
-                fitToScreen()
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val now = SystemClock.uptimeMillis()
+                if (now - lastTapTime < 300 && hypot(event.x - lastTapX, event.y - lastTapY) < 60f) {
+                    lastTapTime = 0
+                    fitToScreen()
+                    return true
+                }
+                lastTapTime = now
+                lastTapX = event.x
+                lastTapY = event.y
+                activePointerId = event.getPointerId(0)
+                twoFinger = false
+                movedSinceDown = false
+                movedLayer = false
+                val (x, y) = toDocument(event.x, event.y)
+                downX = x
+                downY = y
+                lastX = x
+                lastY = y
+                cursorX = x
+                cursorY = y
+                cursorVisible = tool == Tool.BRUSH || tool == Tool.ERASER
+                onDown(session, x, y)
+                invalidate()
                 return true
             }
-            lastTapTime = now
-            lastTapX = event.x
-            lastTapY = event.y
-            activePointerId = event.getPointerId(0)
-            twoFinger = false
-            movedSinceDown = false
-            movedLayer = false
-            bufferDirty = false
-            val (x, y) = toDocument(event.x, event.y)
-            downX = x
-            downY = y
-            lastX = x
-            lastY = y
-            cursorX = x
-            cursorY = y
-            cursorVisible = tool == Tool.BRUSH || tool == Tool.ERASER
-            onDown(session, x, y)
-            invalidate()
-            return true
-        }
 
-        if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
-            twoFinger = true
-            cancelStroke(session)
-            gestureStartDistance = pointerDistance(event)
-            gestureStartZoom = zoom
-            gestureStartPanX = panX
-            gestureStartPanY = panY
-            val (x, y) = toDocument(event.x, event.y)
-            cursorVisible = false
-            movedSinceDown = true
-            invalidate()
-            return true
-        }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger always means "navigate": end whatever the first
+                // one was doing (keeping it undoable) and re-base the gesture.
+                if (!twoFinger) endToolGesture(session)
+                twoFinger = true
+                cursorVisible = false
+                movedSinceDown = true
+                beginGesture(event)
+                invalidate()
+                return true
+            }
 
-        if (event.actionMasked == MotionEvent.ACTION_MOVE) {
-            if (twoFinger || event.pointerCount > 1) return handleGesture(session, event)
-            val (x, y) = toDocument(event.x, event.y)
-            lastX = x
-            lastY = y
-            cursorX = x
-            cursorY = y
-            if (hypot(x - downX, y - downY) > 1.5f) movedSinceDown = true
-            onMove(session, doc, x, y)
-            invalidate()
-            return true
-        }
+            MotionEvent.ACTION_MOVE -> {
+                if (twoFinger || event.pointerCount > 1) {
+                    updateGesture(event)
+                    return true
+                }
+                val (x, y) = toDocument(event.x, event.y)
+                lastX = x
+                lastY = y
+                cursorX = x
+                cursorY = y
+                if (hypot(x - downX, y - downY) > 1.5f) movedSinceDown = true
+                onMove(session, doc, x, y)
+                invalidate()
+                return true
+            }
 
-        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
-            val (x, y) = toDocument(event.x, event.y)
-            cursorVisible = false
-            if (event.actionMasked == MotionEvent.ACTION_UP) onUp(session, doc, x, y) else cancelStroke(session)
-            activePointerId = -1
-            invalidate()
-            return true
+            MotionEvent.ACTION_POINTER_UP -> {
+                // One finger left: keep navigating with the remaining one.
+                if (event.pointerCount > 1) beginGesture(event, skipPointerIndex = event.actionIndex)
+                return true
+            }
+
+            MotionEvent.ACTION_UP -> {
+                val (x, y) = toDocument(event.x, event.y)
+                cursorVisible = false
+                if (!twoFinger) onUp(session, doc, x, y)
+                endToolGesture(session)
+                activePointerId = -1
+                invalidate()
+                return true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                cursorVisible = false
+                endToolGesture(session)
+                activePointerId = -1
+                invalidate()
+                return true
+            }
+
+            else -> return true
         }
-        return true
     }
 
-    private fun pointerDistance(event: MotionEvent): Float {
-        if (event.pointerCount < 2) return 0f
-        val dx = event.getX(1) - event.getX(0)
-        val dy = event.getY(1) - event.getY(0)
+    /* ------------------------------------------------------------- gestures */
+
+    private fun pointerDistance(event: MotionEvent, skipIndex: Int = -1): Float {
+        val indices = (0 until event.pointerCount).filter { it != skipIndex }
+        if (indices.size < 2) return 0f
+        val dx = event.getX(indices[1]) - event.getX(indices[0])
+        val dy = event.getY(indices[1]) - event.getY(indices[0])
         return hypot(dx, dy)
     }
 
-    private fun handleGesture(session: Session, event: MotionEvent): Boolean {
-        val doc = session.doc
+    private fun pointerMidpoint(event: MotionEvent, skipIndex: Int = -1): Pair<Float, Float> {
+        val indices = (0 until event.pointerCount).filter { it != skipIndex }
+        if (indices.isEmpty()) return event.x to event.y
+        var sumX = 0f
+        var sumY = 0f
+        for (index in indices) {
+            sumX += event.getX(index)
+            sumY += event.getY(index)
+        }
+        return sumX / indices.size to sumY / indices.size
+    }
+
+    /**
+     * Records what the fingers are holding: the distance between them, the
+     * current zoom, and the document point under their midpoint. Pinching then
+     * keeps that point under the fingers, and dragging the pair pans — both from
+     * the same data, so the two gestures never fight each other.
+     */
+    private fun beginGesture(event: MotionEvent, skipPointerIndex: Int = -1) {
+        gestureStartDistance = pointerDistance(event, skipPointerIndex)
+        gestureStartZoom = zoom
+        val (midX, midY) = pointerMidpoint(event, skipPointerIndex)
+        val (docX, docY) = toDocument(midX, midY)
+        gestureDocX = docX
+        gestureDocY = docY
+    }
+
+    private fun updateGesture(event: MotionEvent) {
         val distance = pointerDistance(event)
         if (gestureStartDistance > 0f && distance > 0f) {
-            zoom = (gestureStartZoom * (distance / gestureStartDistance)).coerceIn(0.05f, 8f)
+            zoom = (gestureStartZoom * (distance / gestureStartDistance)).coerceIn(minimumZoom(), maximumZoom())
         }
-        // Pan with the midpoint of the two fingers.
-        val midX = (event.getX(0) + event.getX(1)) / 2f
-        val midY = (event.getY(0) + event.getY(1)) / 2f
-        val (docX, docY) = toDocument(midX, midY)
-        panX += midX - (docX * zoom + panX)
-        panY += midY - (docY * zoom + panY)
-        if (doc.width > 0) {
-            // keep the document reachable
-            val margin = 120f
-            panX = panX.coerceIn(-(doc.width * zoom) - margin, width + margin)
-            panY = panY.coerceIn(-(doc.height * zoom) - margin, height + margin)
-        }
+        val (midX, midY) = pointerMidpoint(event)
+        panX = midX - gestureDocX * zoom
+        panY = midY - gestureDocY * zoom
+        clampPan()
         bufferDirty = true
         invalidate()
-        return true
+    }
+
+    /** Keeps the document reachable, and the visible region inside one buffer. */
+    private fun clampPan() {
+        val doc = session?.doc ?: return
+        val margin = 120f
+        panX = panX.coerceIn(-(doc.width * zoom) - margin, width + margin)
+        panY = panY.coerceIn(-(doc.height * zoom) - margin, height + margin)
     }
 
     private fun onDown(session: Session, x: Float, y: Float) {
@@ -545,9 +607,20 @@ class EditorView(context: Context) : View(context) {
         }
     }
 
-    private fun cancelStroke(@Suppress("UNUSED_PARAMETER") session: Session) {
-        strokeEdit = null
-        strokeLayer = null
+    /**
+     * Ends the in-progress tool gesture. A stroke already painted a second ago
+     * stays painted *and* undoable — dropping it silently (pixels changed, no
+     * history entry) would be worse than keeping it.
+     */
+    private fun endToolGesture(session: Session) {
+        val edit = strokeEdit
+        if (edit != null) {
+            session.commitPixelEdit(edit, if (tool == Tool.ERASER) "Erase" else "Brush")
+            strokeEdit = null
+            strokeLayer = null
+            invalidateContent()
+        }
+        if (tool == Tool.MOVE) session.endStructuralEdit("Move layer")
         cropRect = null
     }
 

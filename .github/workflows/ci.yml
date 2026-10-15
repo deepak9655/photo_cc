@@ -24,9 +24,12 @@ jobs:
         with:
           node-version: 22
 
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+      # The engine is plain Kotlin with no Android imports, so CI runs the *same*
+      # script a developer runs locally — including the AWT-backed text support
+      # that the Gradle task cannot reach without a device/emulator. Getting the
+      # compiler from npm keeps the runner free of SDK downloads.
+      - name: Install the Kotlin compiler
+        run: npm install --prefix .kotlin --no-audit --no-fund kotlin-compiler
 
       # Real Photoshop files (third-party sample corpus, not stored in the repo)
       # plus the reference values the Kotlin reader is compared against.
@@ -37,8 +40,11 @@ jobs:
           npm ci --no-audit --no-fund
           node compare-read.mjs
 
-      - name: Self-test the PSD engine on the JVM
-        run: gradle engineTest --no-daemon
+      - name: Engine self-test + independent cross-check
+        run: |
+          export PHOTO_CC_KC="$PWD/.kotlin/node_modules/kotlin-compiler/bin/kotlinc"
+          export PHOTO_CC_STDLIB="$PWD/.kotlin/node_modules/kotlin-compiler/lib/kotlin-stdlib.jar"
+          bash tools/engine-test.sh
 
       - name: Upload test artefacts
         if: always()
@@ -47,9 +53,6 @@ jobs:
           name: engine-test-artifacts
           path: build/engine-test/
           if-no-files-found: ignore
-
-      - name: Verify the written files with an independent reader (ag-psd)
-        run: cd tools/engine && node verify-write.mjs
 
   apk:
     name: Android APK
