@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The XML palette mirrors Ui in Widgets.kt; the theme needs it for the
-         window, the status bar and for framework dialogs. -->
-    <color name="background">#0F1115</color>
-    <color name="surface">#171A20</color>
-    <color name="surface_high">#20242C</color>
-    <color name="text_primary">#F1F3F7</color>
-    <color name="text_dim">#98A0AD</color>
-    <color name="accent">#FF9E3D</color>
+    <!--
+      Neutral graphite, so nothing in the interface competes with the colours in
+      the picture, and one accent for selection and emphasis. The Kotlin side
+      mirrors these values in ui/Palette.kt.
+    -->
+    <color name="background">#14161A</color>
+    <color name="surface">#1C1F24</color>
+    <color name="surface_high">#262A31</color>
+    <color name="surface_max">#32373F</color>
+    <color name="text_primary">#F2F4F8</color>
+    <color name="text_dim">#9BA3AF</color>
+    <color name="accent">#7C6CFF</color>
+    <color name="accent_soft">#337C6CFF</color>
+    <color name="danger">#FF6B6B</color>
     <color name="icon_background">#14161A</color>
 </resources>

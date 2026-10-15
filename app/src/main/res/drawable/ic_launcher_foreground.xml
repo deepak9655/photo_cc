@@ -1,20 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Original app mark: three stacked layers, the front one filled with the accent
-  colour. Drawn from scratch for this project (no third-party assets).
+  Original mark: three stacked slabs seen at an angle — a layered document.
+  Drawn as vector paths; nothing borrowed from anywhere.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- bottom slab -->
     <path
-        android:fillColor="#5A5F6B"
-        android:pathData="M54,30 L80,44 L54,58 L28,44 Z" />
+        android:fillColor="#3B3752"
+        android:pathData="M54,56 L86,70 L54,84 L22,70 Z" />
+    <!-- middle slab -->
     <path
-        android:fillColor="#9AA0A6"
-        android:pathData="M54,42 L80,56 L54,70 L28,56 Z" />
+        android:fillColor="#5A50A8"
+        android:pathData="M54,44 L86,58 L54,72 L22,58 Z" />
+    <!-- top slab -->
     <path
-        android:fillColor="#FFB74D"
-        android:pathData="M54,54 L80,68 L54,82 L28,68 Z" />
+        android:fillColor="#7C6CFF"
+        android:pathData="M54,32 L86,46 L54,60 L22,46 Z" />
 </vector>

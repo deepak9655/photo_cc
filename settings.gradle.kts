@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "photo_cc"
+rootProject.name = "strata"
 include(":app")

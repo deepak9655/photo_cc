@@ -1,49 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  LayerPad — offline PSD editor.
-
-  No permissions are requested at all: files are opened and saved through the
-  system file picker (SAF), so the app cannot reach the network or the photo
-  library on its own. That is a design decision, not an oversight.
--->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-feature
-        android:name="android.hardware.touchscreen"
-        android:required="false" />
+    <!--
+      No permissions at all. Files are opened and saved through the system file
+      picker, so the app never needs access to storage, the network or anything
+      else: it can only touch what you hand it.
+    -->
 
     <application
         android:allowBackup="false"
-        android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:largeHeap="true"
-        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
-        android:theme="@style/AppTheme">
+        android:theme="@style/Strata">
 
         <activity
-            android:name="com.photocc.app.ui.MainActivity"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:name=".ui.MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
-            android:launchMode="singleTop"
-            android:windowSoftInputMode="adjustResize">
-
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Open a .psd from a file manager or another app. -->
+            <!-- "Open with" from a file manager or gallery. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="image/vnd.adobe.photoshop" />
-                <data android:mimeType="application/octet-stream" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="image/*" />
             </intent-filter>
-
-            <!-- Share a photo into the editor as a new layer. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
