@@ -45,7 +45,7 @@
     <string name="scale_value">Scale %1$d%%</string>
     <string name="export_hint">Suggested file name: %1$s</string>
     <string name="fit_screen">Fit to screen</string>
-    <string name="zoom_100">Zoom 100%%</string>
+    <string name="zoom_100">Zoom 100%</string>
     <string name="document_info">Document info</string>
     <string name="info_engine">Zoom %1$d%%</string>
     <string name="info_buffer">Canvas buffer %1$d KB</string>
