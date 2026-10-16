@@ -31,6 +31,7 @@ class Ui(private val c2: Canvas2D, private val density: Float) {
     private var downY = 0f
     private var down = false
     private var dragging = false
+    private var lastMoveY = 0f
     private var active: Widget? = null
     private var startValue = 0f
     /**
@@ -70,6 +71,7 @@ class Ui(private val c2: Canvas2D, private val density: Float) {
                 dragging = false
                 downX = x
                 downY = y
+                lastMoveY = y
                 // Hit-test against the controls as they were drawn last frame: a
                 // tap can arrive between two frames, and it still has to land.
                 active = widgets.lastOrNull { it.rect.contains(x, y + viewportOffsetY) }
@@ -79,6 +81,8 @@ class Ui(private val c2: Canvas2D, private val density: Float) {
                 if (!down) return false
                 if (!dragging && (abs(x - downX) > 6f * density || abs(y - downY) > 6f * density)) dragging = true
                 val widget = active ?: return false
+                val scrollDelta = y - lastMoveY
+                lastMoveY = y
                 when (widget.kind) {
                     Kind.SLIDER -> {
                         val t = ((x - widget.rect.left) / max(1f, widget.rect.width())).coerceIn(0f, 1f)
@@ -86,10 +90,14 @@ class Ui(private val c2: Canvas2D, private val density: Float) {
                         return true
                     }
                     Kind.SCROLL -> {
-                        widget.onValue(y - downY)
+                        if (dragging) widget.onValue(scrollDelta)
                         return true
                     }
-                    else -> return dragging
+                    else -> {
+                        // A finger that slid off a button is not choosing it.
+                        if (dragging) active = null
+                        return true
+                    }
                 }
             }
             else -> {

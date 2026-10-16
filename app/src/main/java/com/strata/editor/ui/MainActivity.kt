@@ -44,6 +44,9 @@ class MainActivity : Activity() {
         private const val REQUEST_SAVE = 4102
         private const val REQUEST_PLACE = 4103
         private const val REQUEST_EXPORT = 4104
+
+        /** Reading the whole file into memory is the only way in, so cap it. */
+        private const val MAX_FILE_BYTES = 384L * 1024L * 1024L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -146,7 +149,7 @@ class MainActivity : Activity() {
     private fun saveDocument() {
         val uri = state.fileUri
         if (uri != null && state.fileIsPsd) {
-            writeBytes(uri, ::saveToUri)
+            saveToUri(uri)
         } else {
             saveDocumentAs()
         }
@@ -195,7 +198,7 @@ class MainActivity : Activity() {
                 state.fileUri = uri
                 state.fileIsPsd = true
                 state.fileName = nameOf(uri)
-                writeBytes(uri, ::saveToUri)
+                saveToUri(uri)
             }
             REQUEST_EXPORT -> writeBytesForExport(uri)
         }
@@ -230,9 +233,25 @@ class MainActivity : Activity() {
         return name ?: uri.lastPathSegment?.substringAfterLast('/') ?: "untitled.psd"
     }
 
+    /** The size a file claims to be, or -1 when the provider will not say. */
+    private fun sizeOf(uri: Uri): Long = try {
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+            if (index >= 0 && cursor.moveToFirst()) cursor.getLong(index) else -1L
+        } ?: -1L
+    } catch (error: Exception) {
+        -1L
+    }
+
     private fun readBytes(uri: Uri, then: (ByteArray, String) -> Unit) {
         state.reportBusy("Opening…")
         val name = nameOf(uri)
+        val declared = sizeOf(uri)
+        if (declared > MAX_FILE_BYTES) {
+            state.reportBusy(null)
+            state.openFailed("That file is ${declared / (1024 * 1024)} MB — too big to open on a phone")
+            return
+        }
         io.execute {
             var bytes: ByteArray? = null
             var failure: String? = null
@@ -263,31 +282,24 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun writeBytes(uri: Uri, then: (Uri) -> Unit) = then(uri)
-
+    /**
+     * The PSD is built on the main thread, because it reads the live document and
+     * a background read could catch a half-finished edit. Writing the finished
+     * bytes then happens off the main thread, which is where the slow part is.
+     */
     private fun saveToUri(uri: Uri) {
         state.reportBusy("Saving…")
+        val bytes = state.saveBytes()
+        if (bytes == null) {
+            state.reportBusy(null)
+            return
+        }
         io.execute {
-            val bytes = state.saveBytes()
-            if (bytes == null) {
-                runOnUiThread { state.reportBusy(null) }
-                return@execute
-            }
-            var failure: String? = null
-            try {
-                contentResolver.openOutputStream(uri, "wt")?.use { stream ->
-                    stream.write(bytes)
-                    stream.flush()
-                } ?: run { failure = "The system refused to write to that place" }
-            } catch (error: OutOfMemoryError) {
-                failure = "Not enough memory to write the file"
-            } catch (error: Exception) {
-                failure = "Could not write the file: ${error.message}"
-            }
-            val problem = failure
+            val failure = writeTo(uri, bytes)
             runOnUiThread {
                 state.reportBusy(null)
-                if (problem != null) state.report(problem, true) else topBar.showMessage("Saved ${state.fileName}")
+                if (failure != null) state.report(failure, true)
+                else topBar.showMessage("Saved ${state.fileName}")
             }
         }
     }
@@ -295,29 +307,34 @@ class MainActivity : Activity() {
     private fun writeBytesForExport(uri: Uri) {
         val format = state.pendingExportFormat
         state.reportBusy("Exporting…")
+        val bytes = state.exportBytes(format)
+        if (bytes == null) {
+            state.reportBusy(null)
+            return
+        }
         io.execute {
-            val bytes = state.exportBytes(format)
-            if (bytes == null) {
-                runOnUiThread { state.reportBusy(null) }
-                return@execute
-            }
-            var failure: String? = null
-            try {
-                contentResolver.openOutputStream(uri, "wt")?.use { stream ->
-                    stream.write(bytes)
-                    stream.flush()
-                } ?: run { failure = "The system refused to write there" }
-            } catch (error: Exception) {
-                failure = "Could not write the image: ${error.message}"
-            }
-            val problem = failure
+            val failure = writeTo(uri, bytes)
             runOnUiThread {
                 state.reportBusy(null)
-                if (problem != null) state.report(problem, true)
+                if (failure != null) state.report(failure, true)
                 else topBar.showMessage("Exported ${state.exportedName(format)}")
             }
         }
     }
+
+    /** @return a message when the write failed, null when it worked. */
+    private fun writeTo(uri: Uri, bytes: ByteArray): String? = try {
+        contentResolver.openOutputStream(uri, "wt")?.use { stream ->
+            stream.write(bytes)
+            stream.flush()
+            null
+        } ?: "The system refused to write there"
+    } catch (error: OutOfMemoryError) {
+        "Not enough memory to write the file"
+    } catch (error: Exception) {
+        "Could not write the file: ${error.message}"
+    }
+
 
     /* ------------------------------------------------------------------- text */
 

@@ -71,13 +71,15 @@ class ChromeView(context: Context) : View(context) {
             val openPanel = panel
             if (state.panel != Panel.NONE && openPanel != null && panelHeight > 1f) {
                 val rect = RectF(0f, panelTop, width.toFloat(), height.toFloat())
+                // Registered first: a scroll area claimed after the controls would
+                // win the hit test and eat every tap inside it.
+                ui.register("panelScroll", rect, Ui.Kind.SCROLL) { delta ->
+                    state.panelScroll = (state.panelScroll - delta).coerceIn(0f, max(0f, contentHeight - panelHeight))
+                }
                 contentHeight = openPanel.draw(c2, ui, rect)
                 val maxScroll = max(0f, contentHeight - panelHeight)
                 state.panelScroll = state.panelScroll.coerceIn(0f, maxScroll)
                 if (maxScroll > 1f) {
-                    ui.register("panelScroll", rect, Ui.Kind.SCROLL) { delta ->
-                        state.panelScroll = (state.panelScroll - delta).coerceIn(0f, maxScroll)
-                    }
                     val fraction = (panelHeight / contentHeight).coerceIn(0f, 1f)
                     val barHeight = max(Palette.dp(28f), panelHeight * fraction)
                     val barY = panelTop + (panelHeight - barHeight) * (state.panelScroll / maxScroll)
@@ -101,6 +103,11 @@ class ChromeView(context: Context) : View(context) {
         val total = tools.size * step + Palette.dp(8f)
         railMax = max(0f, total - width)
         railScroll = railScroll.coerceIn(0f, railMax)
+        if (railMax > 0f) {
+            ui.register("railScroll", RectF(0f, 0f, width.toFloat(), height), Ui.Kind.SCROLL) { delta ->
+                railScroll = (railScroll - delta).coerceIn(0f, railMax)
+            }
+        }
         val top = Palette.dp(4f)
         var x = Palette.dp(4f) - railScroll
         for (tool in tools) {
@@ -117,11 +124,6 @@ class ChromeView(context: Context) : View(context) {
                 onPanelToggled?.invoke()
             }
             x += step
-        }
-        if (railMax > 0f) {
-            ui.register("railScroll", RectF(0f, 0f, width.toFloat(), height), Ui.Kind.SCROLL) { delta ->
-                railScroll = (railScroll - delta).coerceIn(0f, railMax)
-            }
         }
     }
 
@@ -144,6 +146,11 @@ class ChromeView(context: Context) : View(context) {
         val total = tabs.size * step + Palette.dp(4f)
         tabMax = max(0f, total - width)
         tabScroll = tabScroll.coerceIn(0f, tabMax)
+        if (tabMax > 0f) {
+            ui.register("tabScroll", RectF(0f, top, width.toFloat(), top + height), Ui.Kind.SCROLL) { delta ->
+                tabScroll = (tabScroll - delta).coerceIn(0f, tabMax)
+            }
+        }
         val y = top + Palette.dp(3f)
         var x = Palette.dp(4f) - tabScroll
         for ((target, label) in tabs) {
@@ -164,11 +171,6 @@ class ChromeView(context: Context) : View(context) {
                 onPanelToggled?.invoke()
             }
             x += step
-        }
-        if (tabMax > 0f) {
-            ui.register("tabScroll", RectF(0f, top, width.toFloat(), top + height), Ui.Kind.SCROLL) { delta ->
-                tabScroll = (tabScroll - delta).coerceIn(0f, tabMax)
-            }
         }
     }
 

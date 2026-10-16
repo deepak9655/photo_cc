@@ -264,6 +264,12 @@ class ToolPanel(private val state: EditorState) {
         val total = rows.size * step
         val scroll = state.layerScroll.coerceIn(0f, max(0f, total - listHeight))
         state.layerScroll = scroll
+        if (total > listHeight) {
+            // Registered before the rows so a drag scrolls but a tap still selects.
+            ui.register("layerScroll", RectF(x, y, x + width, y + listHeight), Ui.Kind.SCROLL) { delta ->
+                state.layerScroll = (state.layerScroll - delta).coerceIn(0f, max(0f, total - listHeight))
+            }
+        }
         var rowY = y - scroll
         for ((layer, depth) in rows) {
             if (rowY > y - rowHeight && rowY < y + listHeight) drawLayerRow(c2, ui, x, rowY, width, rowHeight, layer, depth)
@@ -271,9 +277,6 @@ class ToolPanel(private val state: EditorState) {
         }
         if (rows.isEmpty()) c2.label("No layers yet", x, y + Palette.dp(20f), Palette.textDim, Palette.sp(13f))
         if (total > listHeight) {
-            ui.register("layerScroll", RectF(x, y, x + width, y + listHeight), Ui.Kind.SCROLL) { delta ->
-                state.layerScroll = (state.layerScroll - delta).coerceIn(0f, max(0f, total - listHeight))
-            }
             val fraction = listHeight / total
             val barHeight = max(Palette.dp(28f), listHeight * fraction)
             val barY = y + (listHeight - barHeight) * (scroll / max(1f, total - listHeight))
