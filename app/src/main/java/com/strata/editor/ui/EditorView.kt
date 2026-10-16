@@ -293,9 +293,12 @@ class EditorView(context: Context) : View(context) {
             // A very large document, zoomed far out: render it whole at a size
             // that fits the budget and let the canvas scale it up.
             val doc = editor.document
-            val targetW = max(1, (doc.width * (MAX_REGION_PIXELS.toDouble() / (doc.width.toDouble() * doc.height))).let { Math.sqrt(it).toInt() })
-                .coerceAtMost(doc.width)
-            val targetH = max(1, (doc.height.toLong() * targetW / doc.width).toInt())
+            // The largest reduction of the whole document that still fits the
+            // budget: the preview is then scaled up to the screen by the canvas.
+            val area = doc.width.toDouble() * doc.height.toDouble()
+            val previewScale = Math.sqrt(MAX_REGION_PIXELS.toDouble() / max(1.0, area))
+            val targetW = max(1, (doc.width * previewScale).toInt()).coerceAtMost(doc.width)
+            val targetH = max(1, (doc.height * previewScale).toInt()).coerceAtMost(doc.height)
             ensureBuffer(targetW, targetH)
             val pixmap = Pixmap(targetW, targetH, buffer)
             pixmap.fill(0)
